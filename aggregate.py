@@ -187,41 +187,41 @@ def _calculate_author_similarity(authors1: List[str], authors2: List[str]) -> fl
         matches = sum(1 for a1 in norm_authors1 for a2 in norm_authors2 if a1 == a2)
         return matches / min(len(norm_authors1), len(norm_authors2)) if min(len(norm_authors1), len(norm_authors2)) > 0 else 0.0
     
-    # Strategy 1: First author matching (often most important)
+    # Strategy 1: First author matching (often most important) - stricter
     first_author_match = False
     if norm_authors1 and norm_authors2:
         first_similarity = fuzz.ratio(norm_authors1[0], norm_authors2[0])
-        first_author_match = first_similarity >= 70  # Lowered threshold
+        first_author_match = first_similarity >= 85  # Much stricter - raised from 70
     
-    # Strategy 2: Count matches using fuzzy matching - lowered thresholds
+    # Strategy 2: Count matches using fuzzy matching - much stricter thresholds
     matches = 0
     for author1 in norm_authors1:
         best_match = max(fuzz.ratio(author1, author2) for author2 in norm_authors2)
-        if best_match >= 70:  # Lowered from 75
+        if best_match >= 85:  # Much stricter - raised from 70
             matches += 1
     
-    # Strategy 3: Handle "et al." cases more aggressively
+    # Strategy 3: Handle "et al." cases more conservatively
     shorter_len = min(len(norm_authors1), len(norm_authors2))
     longer_len = max(len(norm_authors1), len(norm_authors2))
     
-    if longer_len > shorter_len * 1.5:  # Lowered from 2
+    if longer_len > shorter_len * 2:  # More conservative - raised from 1.5
         shorter_authors = norm_authors1 if len(norm_authors1) < len(norm_authors2) else norm_authors2
         longer_authors = norm_authors2 if len(norm_authors1) < len(norm_authors2) else norm_authors1
         
         matched_short = sum(
             1 for short_author in shorter_authors
-            if any(fuzz.ratio(short_author, long_author) >= 70 for long_author in longer_authors)
+            if any(fuzz.ratio(short_author, long_author) >= 85 for long_author in longer_authors)  # Stricter threshold
         )
         
-        if len(shorter_authors) > 0 and matched_short / len(shorter_authors) >= 0.6:  # Lowered from 0.7
+        if len(shorter_authors) > 0 and matched_short / len(shorter_authors) >= 0.8:  # Much stricter - raised from 0.6
             return 0.75
     
-    # Calculate final similarity
+    # Calculate final similarity - more conservative boost
     base_similarity = matches / shorter_len if shorter_len > 0 else 0.0
     
-    # Boost score if first author matches well - increased boost
+    # Small boost if first author matches well - reduced boost
     if first_author_match:
-        base_similarity = min(1.0, base_similarity + 0.25)  # Increased from 0.2
+        base_similarity = min(1.0, base_similarity + 0.15)  # Reduced from 0.25
     
     return base_similarity
 
@@ -234,6 +234,9 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
         doi2 = pub2.doi.lower().strip()
         if doi1 == doi2:
             return True
+        else:
+            # Different DOIs mean definitely different publications
+            return False
     
     # Skip if from the same source (shouldn't be duplicates within same source)
     if pub1.source.lower() == pub2.source.lower():
@@ -256,7 +259,7 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
     best_title_similarity = 0
     best_journal_similarity = 0  # <-- track journal similarity even below threshold
     
-    # Title matching - multiple strategies with lower thresholds
+    # Title matching - MUCH stricter thresholds for pre-merge deduplication
     if pub1.title and pub2.title:
         norm_title1 = _normalize_text_for_matching(pub1.title)
         norm_title2 = _normalize_text_for_matching(pub2.title)
@@ -267,18 +270,18 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
             partial_ratio = fuzz.partial_ratio(norm_title1, norm_title2)
             
             best_title_similarity = max(title_ratio, token_ratio, partial_ratio)
-            title_match = best_title_similarity >= 75  # Lowered from 80
+            title_match = best_title_similarity >= 90  # Much stricter - raised from 75
     
-    # Year matching (allow 1 year difference)
+    # Year matching (allow 1 year difference for publication timing variations)
     if pub1.year and pub2.year:
-        year_match = abs(pub1.year - pub2.year) <= 1
+        year_match = abs(pub1.year - pub2.year) <= 1  # Allow ±1 year for publication timing differences
     
-    # Author matching with improved algorithm
+    # Author matching with much stricter algorithm
     if pub1.authors and pub2.authors:
         author_similarity = _calculate_author_similarity(pub1.authors, pub2.authors)
-        author_match = author_similarity >= 0.25  # Lowered from 0.3
+        author_match = author_similarity >= 0.70  # Much stricter - raised from 0.25
     
-    # Journal matching with lowered threshold
+    # Journal matching with much stricter threshold
     if pub1.journal and pub2.journal:
         norm_journal1 = _normalize_text_for_matching(pub1.journal)
         norm_journal2 = _normalize_text_for_matching(pub2.journal)
@@ -290,30 +293,30 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
                 fuzz.token_set_ratio(norm_journal1, norm_journal2)
             )
             best_journal_similarity = journal_similarity  # <-- store best journal similarity
-            journal_match = journal_similarity >= 65  # Lowered from 70
+            journal_match = journal_similarity >= 85  # Much stricter - raised from 65
     
-    # Explicit permissive rule: title ≈ 0.8, year ±1, journal ≈ 0.5 => match
-    if best_title_similarity >= 80 and year_match and best_journal_similarity >= 50:
-        return True
+    # Remove the permissive rule - it was too lenient
+    # Old rule: if best_title_similarity >= 80 and year_match and best_journal_similarity >= 50:
+    #     return True
     
-    # Enhanced confidence scoring with more granular thresholds
+    # Enhanced confidence scoring with MUCH stricter thresholds
     confidence_score = 0
     if title_match:
-        confidence_score += 3
+        confidence_score += 4  # Increased weight for title match
     if year_match:
-        confidence_score += 2
+        confidence_score += 3  # Increased weight for year match
     if author_match:
-        confidence_score += 2
+        confidence_score += 3  # Increased weight for author match
     if journal_match:
-        confidence_score += 1
+        confidence_score += 2  # Increased weight for journal match
     
-    # More permissive matching criteria
+    # MUCH stricter matching criteria - require very high confidence
     is_match = (
-        confidence_score >= 4 or  # Lowered from 4.5
-        (title_match and year_match and confidence_score >= 3.5) or  # Lowered from 4
-        (title_match and (author_match or journal_match) and confidence_score >= 3) or  # Lowered from 3.5
-        # New: Very strong title match with any other indicator
-        (title_match and best_title_similarity >= 85 and (year_match or author_match or journal_match))
+        confidence_score >= 9 or  # Require almost all criteria - raised from 4
+        (title_match and year_match and author_match and confidence_score >= 8) or  # All three core criteria
+        (title_match and year_match and journal_match and confidence_score >= 8) or  # Alternative with journal
+        # Only allow exceptional cases with near-perfect title match
+        (title_match and best_title_similarity >= 95 and year_match and (author_match or journal_match))
     )
     
     # Debug logging for missed matches (only in debug mode)
@@ -326,6 +329,51 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
             print(f"   Confidence: {confidence_score}, Title: {title_match}, Year: {year_match}, Author: {author_match}, Journal: {journal_match}")
     
     return is_match
+
+
+def _select_best_title(titles: List[str]) -> str:
+    """Select the best-formatted title from a list of title options."""
+    if not titles:
+        return ""
+    
+    if len(titles) == 1:
+        return titles[0]
+    
+    def title_quality_score(title: str) -> float:
+        """Score a title based on formatting quality."""
+        if not title:
+            return 0.0
+        
+        score = 0.0
+        
+        # Prefer titles with proper capitalization (not all lowercase or all uppercase)
+        if not title.islower() and not title.isupper():
+            score += 2.0
+        
+        # Prefer titles with mixed case
+        if any(c.isupper() for c in title) and any(c.islower() for c in title):
+            score += 1.0
+        
+        # Prefer longer titles (more complete)
+        score += len(title) / 1000.0  # Small bonus for length
+        
+        # Prefer titles with proper punctuation
+        if title.endswith('.') or title.endswith('?') or title.endswith('!'):
+            score += 0.5
+        
+        # Penalize titles that are all caps
+        if title.isupper():
+            score -= 1.0
+        
+        # Penalize titles that are all lowercase
+        if title.islower():
+            score -= 0.5
+        
+        return score
+    
+    # Find the title with the best quality score
+    best_title = max(titles, key=title_quality_score)
+    return best_title
 
 
 def _merge_publications(publications: List[Publication]) -> Publication:
@@ -368,9 +416,9 @@ def _merge_publications(publications: List[Publication]) -> Publication:
     # Create merged source string
     merged_source = f"Multiple sources: {', '.join(sorted(list(set(source_info))))}"
     
-    # Use the best available data from all sources
+    # Use the best available data from all sources - prefer better formatted titles
     merged_data = {
-        'title': primary.title,
+        'title': _select_best_title([pub.title for pub in publications_sorted if pub.title]),
         'authors': primary.authors,
         'journal': primary.journal,
         'year': primary.year,

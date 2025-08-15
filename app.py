@@ -29,7 +29,7 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-from aggregate import aggregate_publications
+from aggregate import aggregate_publications, _publications_match, _normalize_text_for_matching, _calculate_author_similarity
 from models import Author, Publication
 from coverage import analyze_publication_coverage
 from config_keys import get_api_keys
@@ -38,132 +38,6 @@ from rapidfuzz import fuzz
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'pubcrawler-dev-key-change-in-production')
-
-
-def _normalize_text(text: str) -> str:
-    """Normalize text for better fuzzy matching (preserves original text)."""
-    if not text:
-        return ""
-    
-    import re
-    
-    # Convert to lowercase and strip for matching only
-    normalized = text.lower().strip()
-    
-    # Remove extra whitespace and normalize spacing
-    normalized = re.sub(r'\s+', ' ', normalized)
-    
-    # Remove common punctuation that might vary between sources
-    normalized = re.sub(r'[.,;:!?"\'\(\)\[\]{}]', '', normalized)
-    
-    # Remove common prefixes/suffixes that might differ
-    normalized = re.sub(r'\b(the|a|an)\b', '', normalized)
-    
-    # Handle common abbreviations and variations
-    normalized = re.sub(r'\bvol\.?\s*', '', normalized)
-    normalized = re.sub(r'\bno\.?\s*', '', normalized)
-    normalized = re.sub(r'\bpp\.?\s*', '', normalized)
-    normalized = re.sub(r'\bissue\s*', '', normalized)
-    normalized = re.sub(r'\bvolume\s*', '', normalized)
-    normalized = re.sub(r'\bnumber\s*', '', normalized)
-    
-    # Remove page numbers and volume/issue info that might differ
-    normalized = re.sub(r'\b\d+[-–—]\d+\b', '', normalized)  # page ranges
-    normalized = re.sub(r'\b\d+\s*\(\d+\)\b', '', normalized)  # vol(issue)
-    
-    # Remove years in parentheses or standalone
-    normalized = re.sub(r'\b(19|20)\d{2}\b', '', normalized)
-    
-    # Clean up multiple spaces created by removals
-    normalized = re.sub(r'\s+', ' ', normalized)
-    
-    return normalized.strip()
-
-
-def _calculate_author_similarity(authors1: List[str], authors2: List[str]) -> float:
-    """Calculate similarity between two author lists with improved matching."""
-    import re
-    
-    if not authors1 or not authors2:
-        return 0.0
-    
-    # Normalize author names - handle different formats
-    def normalize_author(author):
-        if not author:
-            return ""
-        
-        # Remove common suffixes and prefixes
-        normalized = author.lower().strip()
-        # Remove titles and suffixes
-        normalized = re.sub(r'\b(dr|prof|professor|phd|md|jr|sr|ii|iii)\b\.?', '', normalized)
-        # Remove extra spaces
-        normalized = re.sub(r'\s+', ' ', normalized).strip()
-        return normalized
-    
-    norm_authors1 = [normalize_author(author) for author in authors1 if author]
-    norm_authors2 = [normalize_author(author) for author in authors2 if author]
-    
-    # Remove empty authors
-    norm_authors1 = [a for a in norm_authors1 if a]
-    norm_authors2 = [a for a in norm_authors2 if a]
-    
-    if not norm_authors1 or not norm_authors2:
-        return 0.0
-    
-    # Strategy 1: Try to match first author (often most important)
-    first_author_match = False
-    if norm_authors1 and norm_authors2:
-        first_similarity = fuzz.ratio(norm_authors1[0], norm_authors2[0])
-        first_author_match = first_similarity >= 75
-    
-    # Strategy 2: Count overall matches using fuzzy matching
-    matches = 0
-    total_comparisons = 0
-    
-    for author1 in norm_authors1:
-        best_match = 0
-        for author2 in norm_authors2:
-            similarity = fuzz.ratio(author1, author2)
-            best_match = max(best_match, similarity)
-            total_comparisons += 1
-        
-        # Consider it a match if similarity is high enough
-        if best_match >= 75:  # Lowered threshold
-            matches += 1
-    
-    # Strategy 3: Handle "et al." cases - if one list is much shorter, be more lenient
-    shorter_list_len = min(len(norm_authors1), len(norm_authors2))
-    longer_list_len = max(len(norm_authors1), len(norm_authors2))
-    
-    # If one list has significantly fewer authors (suggesting "et al."), 
-    # check if the shorter list authors are in the longer list
-    if longer_list_len > shorter_list_len * 2:
-        # Focus on matching the shorter list
-        shorter_authors = norm_authors1 if len(norm_authors1) < len(norm_authors2) else norm_authors2
-        longer_authors = norm_authors2 if len(norm_authors1) < len(norm_authors2) else norm_authors1
-        
-        matched_short = 0
-        for short_author in shorter_authors:
-            for long_author in longer_authors:
-                if fuzz.ratio(short_author, long_author) >= 75:
-                    matched_short += 1
-                    break
-        
-        short_list_similarity = matched_short / len(shorter_authors) if shorter_authors else 0
-        
-        # If most of the shorter list matches, consider it a good match
-        if short_list_similarity >= 0.7:  # 70% of short list matches
-            return 0.8
-    
-    # Calculate final similarity
-    min_authors = min(len(norm_authors1), len(norm_authors2))
-    base_similarity = matches / min_authors if min_authors > 0 else 0.0
-    
-    # Boost score if first author matches
-    if first_author_match:
-        base_similarity = min(1.0, base_similarity + 0.2)
-    
-    return base_similarity
 
 
 @app.route('/')
@@ -394,8 +268,8 @@ def api_test_matching():
         # Get detailed scores
         title_similarity = 0
         if pub1.title and pub2.title:
-            norm1 = _normalize_text(pub1.title)
-            norm2 = _normalize_text(pub2.title)
+            norm1 = _normalize_text_for_matching(pub1.title)
+            norm2 = _normalize_text_for_matching(pub2.title)
             title_similarity = max(
                 fuzz.ratio(norm1, norm2),
                 fuzz.token_set_ratio(norm1, norm2),
@@ -408,8 +282,8 @@ def api_test_matching():
         
         journal_similarity = 0
         if pub1.journal and pub2.journal:
-            norm1 = _normalize_text(pub1.journal)
-            norm2 = _normalize_text(pub2.journal)
+            norm1 = _normalize_text_for_matching(pub1.journal)
+            norm2 = _normalize_text_for_matching(pub2.journal)
             journal_similarity = max(
                 fuzz.ratio(norm1, norm2),
                 fuzz.partial_ratio(norm1, norm2),
@@ -426,10 +300,10 @@ def api_test_matching():
                 'doi_match': pub1.doi and pub2.doi and pub1.doi.lower().strip() == pub2.doi.lower().strip()
             },
             'normalized': {
-                'title1': _normalize_text(pub1.title) if pub1.title else '',
-                'title2': _normalize_text(pub2.title) if pub2.title else '',
-                'journal1': _normalize_text(pub1.journal) if pub1.journal else '',
-                'journal2': _normalize_text(pub2.journal) if pub2.journal else ''
+                'title1': _normalize_text_for_matching(pub1.title) if pub1.title else '',
+                'title2': _normalize_text_for_matching(pub2.title) if pub2.title else '',
+                'journal1': _normalize_text_for_matching(pub1.journal) if pub1.journal else '',
+                'journal2': _normalize_text_for_matching(pub2.journal) if pub2.journal else ''
             }
         })
         
@@ -777,67 +651,6 @@ def debug_publication_matching(publications: List[Publication], verbose: bool = 
     stats['unique_publications'] = len(seen_publications)
     
     return dict(stats)
-
-
-def _publications_match(pub1: Publication, pub2: Publication) -> bool:
-    """Check if two publications are the same using improved fuzzy matching."""
-    # DOI match
-    if pub1.doi and pub2.doi and pub1.doi.lower().strip() == pub2.doi.lower().strip():
-        return True
-    
-    # Enhanced fuzzy matching
-    title_match = False
-    year_match = False
-    author_match = False
-    journal_match = False
-    
-    # Title matching with multiple strategies
-    if pub1.title and pub2.title:
-        norm_title1 = _normalize_text(pub1.title)
-        norm_title2 = _normalize_text(pub2.title)
-        
-        title_ratio = fuzz.ratio(norm_title1, norm_title2)
-        token_ratio = fuzz.token_set_ratio(norm_title1, norm_title2)
-        partial_ratio = fuzz.partial_ratio(norm_title1, norm_title2)
-        
-        best_title_similarity = max(title_ratio, token_ratio, partial_ratio)
-        title_match = best_title_similarity >= 80
-    
-    # Year matching (allow 1 year difference)
-    if pub1.year and pub2.year:
-        year_match = abs(pub1.year - pub2.year) <= 1
-    
-    # Author matching
-    if pub1.authors and pub2.authors:
-        author_similarity = _calculate_author_similarity(pub1.authors, pub2.authors)
-        author_match = author_similarity >= 0.3
-    
-    # Journal matching
-    if pub1.journal and pub2.journal:
-        norm_journal1 = _normalize_text(pub1.journal)
-        norm_journal2 = _normalize_text(pub2.journal)
-        journal_similarity = max(
-            fuzz.ratio(norm_journal1, norm_journal2),
-            fuzz.partial_ratio(norm_journal1, norm_journal2),
-            fuzz.token_set_ratio(norm_journal1, norm_journal2)
-        )
-        journal_match = journal_similarity >= 70
-    
-    # Use same confidence scoring as main function
-    confidence_score = 0
-    if title_match:
-        confidence_score += 3
-    if year_match:
-        confidence_score += 2
-    if author_match:
-        confidence_score += 2
-    if journal_match:
-        confidence_score += 1
-    
-    # Same matching criteria as main function
-    return (confidence_score >= 4.5 or 
-            (title_match and year_match and confidence_score >= 4) or
-            (title_match and (author_match or journal_match) and confidence_score >= 3.5))
 
 
 if __name__ == '__main__':

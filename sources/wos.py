@@ -272,7 +272,7 @@ def _wos_pipeline_single(
     df = pd.json_normalize(raw_docs)
 
     # Extract and clean data fields
-    df["title"] = df.get("title", "").astype(str).str.strip().str.lower()
+    df["title"] = df.get("title", "").astype(str).str.strip()  # Preserve original casing
     df["authors"] = df.get("names.authors", []).apply(_parse_authors)
     df["journal"] = df.get("source.sourceTitle", "")
     df["year"] = pd.to_numeric(df.get("source.publishYear", ""), errors="coerce")
@@ -333,7 +333,7 @@ def _wos_pipeline_name_based(
     df = pd.json_normalize(raw_docs)
 
     # Process similar to single author ID pipeline
-    df["title"] = df.get("title", "").astype(str).str.strip().str.lower()
+    df["title"] = df.get("title", "").astype(str).str.strip()  # Preserve original casing
     df["authors"] = df.get("names.authors", []).apply(_parse_authors)
     df["journal"] = df.get("source.sourceTitle", "")
     df["year"] = pd.to_numeric(df.get("source.publishYear", ""), errors="coerce")

@@ -160,7 +160,7 @@ def _scopus_to_canonical(raw_df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=colmap)
 
     # --- Clean and transform columns ---
-    df["title"] = df["title"].astype(str).str.strip().str.lower()
+    df["title"] = df["title"].astype(str).str.strip()  # Preserve original casing
     df["authors"] = df["authors"].apply(_parse_scopus_authors)
     df["year"] = pd.to_datetime(df["year"], errors="coerce").dt.year.astype("Int64")
     df["citations"] = pd.to_numeric(df["citations"], errors="coerce").fillna(0).astype(int)

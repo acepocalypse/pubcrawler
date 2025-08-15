@@ -540,7 +540,7 @@ def _standardize_gs_columns(df: pd.DataFrame) -> pd.DataFrame:
     
     # Map to standard columns
     standardized = pd.DataFrame()
-    standardized["title"] = df.get("title", "").astype(str).str.strip().str.lower()
+    standardized["title"] = df.get("title", "").astype(str).str.strip()  # Preserve original casing
     standardized["authors"] = df.get("authors", "").apply(
         lambda x: [name.strip() for name in str(x).split(',') if name.strip()] 
         if pd.notna(x) and x != '' else []
@@ -618,7 +618,7 @@ def fetch(
         
         pubs.append(
             Publication(
-                title=str(row.get('title', '')).strip().lower(),
+                title=str(row.get('title', '')).strip(),  # Preserve original casing
                 authors=authors,
                 journal=str(row.get('journal', '')) if pd.notna(row.get('journal')) else None,
                 year=int(row['year']) if pd.notna(row.get('year')) and str(row['year']).isdigit() else None,

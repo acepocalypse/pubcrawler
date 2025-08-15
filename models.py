@@ -35,7 +35,7 @@ class Publication:
     Attributes
     ----------
     title : str
-        The publication title (automatically normalized to lowercase).
+        The publication title (original casing preserved).
     authors : List[str]
         List of author names.
     journal : Optional[str]
