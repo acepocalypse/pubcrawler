@@ -19,6 +19,15 @@ import os
 import sys
 from pathlib import Path
 
+def check_python_version():
+    """Check if we're running Python 3.8+"""
+    if sys.version_info < (3, 8):
+        print("❌ Python 3.8 or higher is required")
+        print(f"   Current version: {sys.version}")
+        print("   Please upgrade Python from https://python.org")
+        return False
+    return True
+
 def check_dependencies():
     """Check if required dependencies are installed."""
     missing_deps = []
@@ -44,6 +53,8 @@ def check_dependencies():
             print(f"   • {dep}")
         print("\nInstall them with:")
         print("   pip install -r requirements.txt")
+        print("   OR")
+        print("   python -m pip install -r requirements.txt")
         return False
     
     return True
@@ -84,6 +95,10 @@ def main():
     
     args = parser.parse_args()
     
+    # Check Python version
+    if not check_python_version():
+        sys.exit(1)
+    
     # Check dependencies
     if not args.no_check and not check_dependencies():
         sys.exit(1)
@@ -110,6 +125,9 @@ def main():
     except ImportError as e:
         print(f"❌ Failed to import Flask app: {e}")
         print("Make sure you're in the correct directory and Flask is installed.")
+        print()
+        print("💡 Try:")
+        print("   pip install flask pandas rapidfuzz")
         sys.exit(1)
     except KeyboardInterrupt:
         print("\n👋 Server stopped by user")

@@ -294,7 +294,7 @@
                                 <th class="py-3 px-6 font-medium text-gray-700">Year</th>
                                 <th class="py-3 px-6 font-medium text-gray-700">Journal</th>
                                 <th class="py-3 px-6 font-medium text-gray-700">DOI</th>
-                                <th class="py-3 px-6 font-medium text-gray-700 text-center">Citations</th>
+                                <th class="py-3 px-6 font-medium text-gray-700 text-center">Citations by Source</th>
                                 <th class="py-3 px-6 font-medium text-gray-700 text-center">Coverage</th>
                             </tr>
                         </thead>
@@ -626,6 +626,68 @@
                 `<a href="https://doi.org/${pub.doi}" target="_blank" class="text-blue-600 hover:underline text-sm">${pub.doi}</a>` : 
                 '<span class="text-gray-400 text-sm">No DOI</span>';
 
+            // Citation formatting - use source_citations if available for detailed breakdown
+            let citationHtml = '';
+            if (pub.source_citations && Object.keys(pub.source_citations).length > 1) {
+                // Multiple sources with sleek, compact design
+                const sources = Object.entries(pub.source_citations).map(([source, count]) => {
+                    let badgeColor = 'bg-gray-500';
+                    let sourceName = source;
+                    
+                    if (source === 'google_scholar') {
+                        badgeColor = 'bg-gray-700';
+                        sourceName = 'GS';
+                    } else if (source === 'scopus') {
+                        badgeColor = 'bg-red-500';
+                        sourceName = 'Scopus';
+                    } else if (source === 'wos') {
+                        badgeColor = 'bg-blue-500';
+                        sourceName = 'WoS';
+                    }
+                    
+                    return `<div class="inline-flex items-center ${badgeColor} text-white text-xs px-2 py-1 rounded-full mr-1 mb-1">
+                        <span class="font-medium">${count}</span>
+                        <span class="ml-1 opacity-80">${sourceName}</span>
+                    </div>`;
+                }).join('');
+                
+                citationHtml = `
+                    <div class="text-center">
+                        <div class="flex flex-wrap justify-center">
+                            ${sources}
+                        </div>
+                    </div>
+                `;
+            } else if (pub.source_citations && Object.keys(pub.source_citations).length === 1) {
+                // Single source with citation count
+                const [source, count] = Object.entries(pub.source_citations)[0];
+                let badgeColor = 'bg-gray-500';
+                let sourceName = source;
+                
+                if (source === 'google_scholar') {
+                    badgeColor = 'bg-gray-700';
+                    sourceName = 'Google Scholar';
+                } else if (source === 'scopus') {
+                    badgeColor = 'bg-red-500';
+                    sourceName = 'Scopus';
+                } else if (source === 'wos') {
+                    badgeColor = 'bg-blue-500';
+                    sourceName = 'Web of Science';
+                }
+                
+                citationHtml = `
+                    <div class="text-center">
+                        <div class="font-semibold text-lg">${count}</div>
+                        <div class="text-xs text-gray-500">${sourceName}</div>
+                    </div>
+                `;
+            } else if (pub.citations) {
+                // Fallback to simple citation count
+                citationHtml = `<div class="text-center"><span class="font-semibold text-lg">${pub.citations}</span></div>`;
+            } else {
+                citationHtml = '<div class="text-center"><span class="text-gray-400">0</span></div>';
+            }
+
             row.innerHTML = `
                 <td data-label="Title & Authors" class="py-4 px-6">
                     <div class="font-medium">${pub.title || 'Untitled'}</div>
@@ -634,7 +696,7 @@
                 <td data-label="Year" class="py-4 px-6">${pub.year || 'N/A'}</td>
                 <td data-label="Journal" class="py-4 px-6">${pub.journal || 'Unknown'}</td>
                 <td data-label="DOI" class="py-4 px-6">${doiHtml}</td>
-                <td data-label="Citations" class="py-4 px-6 text-center">${pub.citations || 0}</td>
+                <td data-label="Citations by Source" class="py-4 px-6">${citationHtml}</td>
                 <td data-label="Coverage" class="py-4 px-6">${coverageHtml}</td>
             `;
 

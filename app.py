@@ -256,8 +256,8 @@ def api_search():
         publications = aggregate_publications(
             author=author,
             api_keys=clean_api_keys,
-            max_pubs_g_scholar=100,
-            headless_g_scholar=True,  # Always headless for web interface
+            max_pubs_g_scholar=1000,
+            headless_g_scholar=False,  # Always headless for web interface
             analyze_coverage=False  # We'll do this separately
         )
         
@@ -319,6 +319,9 @@ def api_search():
             'coverage_analysis': coverage_report,
             'filters_applied': filters
         }
+        
+        # Clean the response data to ensure JSON serialization
+        response_data = _clean_response_for_json(response_data)
         
         # Add debug info in development mode
         if app.debug and debug_info:
@@ -451,6 +454,26 @@ def api_export():
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
 
 
+def _clean_response_for_json(data):
+    """Recursively clean response data to ensure JSON serialization."""
+    import math
+    
+    if isinstance(data, dict):
+        return {key: _clean_response_for_json(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [_clean_response_for_json(item) for item in data]
+    elif isinstance(data, float):
+        if math.isnan(data) or math.isinf(data):
+            return None
+        return data
+    elif data is None:
+        return None
+    elif isinstance(data, str) and data.lower() in ['nan', 'none', 'null']:
+        return None
+    else:
+        return data
+
+
 def _apply_filters(publications: List[Publication], filters: Dict) -> List[Publication]:
     """Apply user-specified filters to publications."""
     filtered_pubs = publications.copy()
@@ -469,11 +492,11 @@ def _apply_filters(publications: List[Publication], filters: Dict) -> List[Publi
     database_filter = filters.get('database')
     if database_filter and database_filter != 'All Databases':
         if database_filter == 'Google Scholar Only':
-            filtered_pubs = [p for p in filtered_pubs if p.source == 'Google Scholar']
+            filtered_pubs = [p for p in filtered_pubs if 'google scholar' in p.source.lower()]
         elif database_filter == 'Scopus Only':
-            filtered_pubs = [p for p in filtered_pubs if p.source == 'Scopus']
+            filtered_pubs = [p for p in filtered_pubs if 'scopus' in p.source.lower()]
         elif database_filter == 'Web of Science Only':
-            filtered_pubs = [p for p in filtered_pubs if p.source == 'Web of Science']
+            filtered_pubs = [p for p in filtered_pubs if 'web of science' in p.source.lower() or 'wos' in p.source.lower()]
     
     # Sort
     sort_by = filters.get('sort_by', 'newest')
@@ -489,6 +512,18 @@ def _apply_filters(publications: List[Publication], filters: Dict) -> List[Publi
 
 def _format_publication(pub: Publication, all_publications: List[Publication] = None) -> Dict:
     """Format a publication for JSON response with coverage analysis using fuzzy matching."""
+    import math
+    
+    # Helper function to clean values for JSON serialization
+    def clean_value(value):
+        if value is None:
+            return None
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            return None
+        if isinstance(value, str) and value.lower() in ['nan', 'none', 'null', '']:
+            return None
+        return value
+    
     # Analyze coverage by looking for the same publication across sources
     coverage = {
         'google_scholar': False,
@@ -496,162 +531,111 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         'wos': False
     }
     
-    # If we have all publications, check for duplicates across sources using fuzzy matching
-    if all_publications:
-        # Find publications that match this one using multiple criteria
-        matching_pubs = []
+    # Track citations from each source
+    source_citations = {}
+    
+    # Check if this publication has already been merged from multiple sources
+    source_lower = pub.source.lower() if pub.source else ""
+    if 'multiple sources:' in source_lower:
+        # Parse the merged sources with citation information
+        # Format: "Multiple sources: Google Scholar (45 cites), Scopus (52 cites)"
+        import re
         
-        for other_pub in all_publications:
-            # Skip if comparing with itself
-            if pub is other_pub:
-                matching_pubs.append(other_pub)
-                continue
-            
-            # Method 1: Exact DOI match (highest priority)
-            if pub.doi and other_pub.doi and pub.doi.lower().strip() == other_pub.doi.lower().strip():
-                matching_pubs.append(other_pub)
-                continue
-            
-            # Method 2: Fuzzy matching on title, authors, year, and journal
-            title_match = False
-            author_match = False
-            year_match = False
-            journal_match = False
-            
-            # Title fuzzy matching with multiple strategies
-            title_match = False
-            title_similarity = 0
-            if pub.title and other_pub.title:
-                norm_title1 = _normalize_text(pub.title)
-                norm_title2 = _normalize_text(other_pub.title)
-                
-                # Strategy 1: Standard fuzzy ratio
-                title_similarity = fuzz.ratio(norm_title1, norm_title2)
-                
-                # Strategy 2: Token set ratio (handles word order differences)
-                token_similarity = fuzz.token_set_ratio(norm_title1, norm_title2)
-                
-                # Strategy 3: Partial ratio (handles truncated titles)
-                partial_similarity = fuzz.partial_ratio(norm_title1, norm_title2)
-                
-                # Use the best similarity score
-                best_title_similarity = max(title_similarity, token_similarity, partial_similarity)
-                title_match = best_title_similarity >= 80  # Lowered threshold
-                
-                # Additional check for very similar titles
-                if best_title_similarity >= 95:
-                    title_match = True
-            
-            # Year exact match (allow 1-year difference for edge cases)
-            year_match = False
-            if pub.year and other_pub.year:
-                year_match = abs(pub.year - other_pub.year) <= 1  # Allow 1 year difference
-            
-            # Author similarity using the improved helper function
-            author_match = False
-            author_similarity = 0
-            if pub.authors and other_pub.authors:
-                author_similarity = _calculate_author_similarity(pub.authors, other_pub.authors)
-                author_match = author_similarity >= 0.3  # More lenient threshold
-            
-            # Journal fuzzy matching with better normalization
-            journal_match = False
-            journal_similarity = 0
-            if pub.journal and other_pub.journal:
-                norm_journal1 = _normalize_text(pub.journal)
-                norm_journal2 = _normalize_text(other_pub.journal)
-                
-                # Try multiple fuzzy matching strategies for journals
-                journal_ratio = fuzz.ratio(norm_journal1, norm_journal2)
-                journal_partial = fuzz.partial_ratio(norm_journal1, norm_journal2)
-                journal_token = fuzz.token_set_ratio(norm_journal1, norm_journal2)
-                
-                journal_similarity = max(journal_ratio, journal_partial, journal_token)
-                journal_match = journal_similarity >= 70  # More lenient for journals
-            
-            # Enhanced decision logic with more nuanced scoring
-            confidence_score = 0
-            
-            # Title scoring with gradual points
-            if title_match:
-                if best_title_similarity >= 95:
-                    confidence_score += 4  # Very strong title match
-                elif best_title_similarity >= 90:
-                    confidence_score += 3.5
-                elif best_title_similarity >= 85:
-                    confidence_score += 3
-                else:
-                    confidence_score += 2.5
-            
-            # Year scoring
-            if year_match:
-                confidence_score += 2
-            
-            # Author scoring with gradual points
-            if author_match:
-                if author_similarity >= 0.7:
-                    confidence_score += 2.5  # Strong author match
-                elif author_similarity >= 0.5:
-                    confidence_score += 2
-                else:
-                    confidence_score += 1.5
-            
-            # Journal scoring
-            if journal_match:
-                if journal_similarity >= 90:
-                    confidence_score += 1.5
-                else:
-                    confidence_score += 1
-            
-            # More flexible matching criteria
-            is_match = False
-            
-            # High confidence match
-            if confidence_score >= 4.5:
-                is_match = True
-            # Strong title + year combination
-            elif title_match and year_match and confidence_score >= 4:
-                is_match = True
-            # Very strong title match alone (for cases with missing data)
-            elif title_match and best_title_similarity >= 95 and confidence_score >= 3:
-                is_match = True
-            # Title + either authors or journal
-            elif title_match and (author_match or journal_match) and confidence_score >= 3.5:
-                is_match = True
-            
-            if is_match:
-                matching_pubs.append(other_pub)
-        
-        # Check which sources have this publication
-        for match_pub in matching_pubs:
-            source_lower = match_pub.source.lower()
-            if 'google scholar' in source_lower:
-                coverage['google_scholar'] = True
-            elif 'scopus' in source_lower:
-                coverage['scopus'] = True
-            elif 'web of science' in source_lower or 'wos' in source_lower:
-                coverage['wos'] = True
-    else:
-        # Fallback: just mark the source of this publication
-        source_lower = pub.source.lower()
         if 'google scholar' in source_lower:
             coverage['google_scholar'] = True
+            # Extract citation count for Google Scholar
+            match = re.search(r'google scholar \((\d+) cites?\)', source_lower)
+            if match:
+                source_citations['google_scholar'] = int(match.group(1))
+        
+        if 'scopus' in source_lower:
+            coverage['scopus'] = True
+            # Extract citation count for Scopus
+            match = re.search(r'scopus \((\d+) cites?\)', source_lower)
+            if match:
+                source_citations['scopus'] = int(match.group(1))
+        
+        if 'web of science' in source_lower or 'wos' in source_lower:
+            coverage['wos'] = True
+            # Extract citation count for Web of Science
+            match = re.search(r'(?:web of science|wos) \((\d+) cites?\)', source_lower)
+            if match:
+                source_citations['wos'] = int(match.group(1))
+    else:
+        # Single source publication - mark its source and look for fuzzy matches
+        if 'google scholar' in source_lower:
+            coverage['google_scholar'] = True
+            source_citations['google_scholar'] = clean_value(pub.citations) or 0
         elif 'scopus' in source_lower:
             coverage['scopus'] = True
+            source_citations['scopus'] = clean_value(pub.citations) or 0
         elif 'web of science' in source_lower or 'wos' in source_lower:
             coverage['wos'] = True
+            source_citations['wos'] = clean_value(pub.citations) or 0
+        
+        # If we have all publications, check for duplicates across sources using fuzzy matching
+        # (This handles cases where deduplication might have missed some matches)
+        if all_publications:
+            # Find publications that match this one using multiple criteria
+            matching_pubs = []
+            
+            for other_pub in all_publications:
+                # Skip if comparing with itself
+                if pub is other_pub:
+                    continue
+                
+                # Skip if the other publication also has multiple sources (already processed)
+                if 'multiple sources:' in other_pub.source.lower():
+                    continue
+                
+                # Method 1: Exact DOI match (highest priority)
+                if (pub.doi and other_pub.doi and 
+                    clean_value(pub.doi) and clean_value(other_pub.doi) and
+                    pub.doi.lower().strip() == other_pub.doi.lower().strip()):
+                    matching_pubs.append(other_pub)
+                    continue
+                
+                # Method 2: Fuzzy matching on title, authors, year, and journal
+                if _publications_match(pub, other_pub):
+                    matching_pubs.append(other_pub)
+            
+            # Check which sources have this publication and their citation counts
+            for match_pub in matching_pubs:
+                other_source_lower = match_pub.source.lower() if match_pub.source else ""
+                match_citations = clean_value(match_pub.citations) or 0
+                
+                if 'google scholar' in other_source_lower:
+                    coverage['google_scholar'] = True
+                    source_citations['google_scholar'] = match_citations
+                elif 'scopus' in other_source_lower:
+                    coverage['scopus'] = True
+                    source_citations['scopus'] = match_citations
+                elif 'web of science' in other_source_lower or 'wos' in other_source_lower:
+                    coverage['wos'] = True
+                    source_citations['wos'] = match_citations
     
-    return {
-        'title': pub.title,
-        'authors': pub.authors,
-        'journal': pub.journal,
-        'year': pub.year,
-        'doi': pub.doi,
-        'citations': pub.citations or 0,
-        'source': pub.source,
-        'url': pub.url,
+    # Clean and format all values for JSON
+    formatted_pub = {
+        'title': clean_value(pub.title) or "",
+        'authors': pub.authors if isinstance(pub.authors, list) else [],
+        'journal': clean_value(pub.journal),
+        'year': clean_value(pub.year),
+        'doi': clean_value(pub.doi),
+        'citations': int(clean_value(pub.citations)) if clean_value(pub.citations) is not None else 0,
+        'source': clean_value(pub.source) or "Unknown",
+        'url': clean_value(pub.url),
         'coverage': coverage
     }
+    
+    # Add detailed citation information if available
+    if source_citations:
+        formatted_pub['source_citations'] = source_citations
+        
+        # Calculate total unique coverage
+        total_coverage = sum(1 for covered in coverage.values() if covered)
+        formatted_pub['coverage_count'] = total_coverage
+    
+    return formatted_pub
 
 
 def _export_to_csv(publications_data: List[Dict]) -> str:
@@ -663,15 +647,18 @@ def _export_to_csv(publications_data: List[Dict]) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Header
+    # Header with detailed citation information
     writer.writerow([
-        'Title', 'Authors', 'Journal', 'Year', 'DOI', 'Citations', 
-        'Source', 'Google Scholar', 'Scopus', 'Web of Science'
+        'Title', 'Authors', 'Journal', 'Year', 'DOI', 'Max Citations', 
+        'Source', 'Google Scholar', 'Scopus', 'Web of Science',
+        'GS Citations', 'Scopus Citations', 'WoS Citations', 'Coverage Count'
     ])
     
     # Data rows
     for pub in publications_data:
         coverage = pub.get('coverage', {})
+        source_citations = pub.get('source_citations', {})
+        
         writer.writerow([
             pub.get('title', ''),
             '; '.join(pub.get('authors', [])),
@@ -682,7 +669,11 @@ def _export_to_csv(publications_data: List[Dict]) -> str:
             pub.get('source', ''),
             'Yes' if coverage.get('google_scholar') else 'No',
             'Yes' if coverage.get('scopus') else 'No',
-            'Yes' if coverage.get('wos') else 'No'
+            'Yes' if coverage.get('wos') else 'No',
+            source_citations.get('google_scholar', '') if source_citations.get('google_scholar') is not None else '',
+            source_citations.get('scopus', '') if source_citations.get('scopus') is not None else '',
+            source_citations.get('wos', '') if source_citations.get('wos') is not None else '',
+            pub.get('coverage_count', sum(1 for v in coverage.values() if v))
         ])
     
     output.seek(0)
@@ -723,7 +714,15 @@ def debug_publication_matching(publications: List[Publication], verbose: bool = 
     
     # Count by source
     for pub in publications:
-        stats['by_source'][pub.source] += 1
+        # Handle both single sources and merged sources
+        if 'multiple sources:' in pub.source.lower():
+            # Extract individual sources from merged string
+            source_part = pub.source.split(':', 1)[1].strip()
+            individual_sources = [s.strip() for s in source_part.split(',')]
+            for source in individual_sources:
+                stats['by_source'][source] += 1
+        else:
+            stats['by_source'][pub.source] += 1
     
     # Find potential duplicates using the same fuzzy matching logic
     seen_publications = []
