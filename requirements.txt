@@ -1,0 +1,13 @@
+pandas
+rapidfuzz
+requests
+selenium
+webdriver-manager
+undetected-chromedriver
+fake-useragent
+beautifulsoup4
+lxml
+openpyxl
+numpy
+flask
+werkzeug

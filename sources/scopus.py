@@ -1,0 +1,307 @@
+"""pubcrawler.sources.scopus
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Scopus harvesting module for the **pubcrawler** pipeline.
+
+▸ Public entry‑point
+    fetch(scopus_id, api_key, **options) -> list[Publication]
+    --------------------------------------------------------
+    • Wraps the Scopus Search API.
+    • Fetches all works associated with the provided Scopus ID.
+    • Converts the raw JSON response into the pipeline's *canonical* schema
+      (see models.Publication).
+    • Returns `List[Publication]` ready for aggregation.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+from typing import Any, Dict, List
+from urllib.parse import quote
+
+import pandas as pd
+import requests
+
+# ----- pubcrawler core ------------------------------------------------------
+try:
+    from ..models import Publication  # dataclass defined in pubcrawler/models.py
+except ImportError:
+    # Fallback for when running as a standalone script
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent.parent))
+    from models import Publication
+
+__all__ = ["fetch"]
+
+
+# ---------------------------------------------------------------------------
+# 1)  Core Scopus API Client
+# ---------------------------------------------------------------------------
+
+def _fetch_scopus_works(
+    scopus_id: str, api_key: str, batch_size: int = 25
+) -> list[dict]:
+    """Fetch all publications for a single Scopus Author ID."""
+    headers = {"X-ELS-APIKey": api_key, "Accept": "application/json"}
+    works, start_index = [], 0
+    max_api_calls = 50  # Safety break to prevent infinite loops
+    call_count = 0
+
+    while call_count < max_api_calls:
+        params = {
+            "query": f"AU-ID({scopus_id})",
+            "view": "COMPLETE",
+            "start": start_index,
+            "count": batch_size,
+        }
+        try:
+            resp = requests.get(
+                "https://api.elsevier.com/content/search/scopus",
+                headers=headers,
+                params=params,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching works for Scopus ID {scopus_id} (start={start_index}): {e}")
+            break
+
+        batch_entries = data.get("search-results", {}).get("entry", [])
+        if not batch_entries:
+            break  # No more results
+
+        works.extend(batch_entries)
+        start_index += batch_size
+        call_count += 1
+        time.sleep(0.1)  # Be polite to the API
+
+    if call_count >= max_api_calls:
+        print(f"Warning: Reached API call limit ({max_api_calls}) for Scopus ID {scopus_id}.")
+
+    return works
+
+
+def _query_scopus_by_id(
+    scopus_id: str, api_key: str, page_batch: int = 25
+) -> pd.DataFrame:
+    """Fetches works for a given Scopus ID, returning a raw DataFrame."""
+    print(f"Fetching works for Scopus ID: {scopus_id}")
+
+    raw_works = _fetch_scopus_works(scopus_id, api_key, batch_size=page_batch)
+    
+    if not raw_works:
+        print(f"No works found for Scopus ID: {scopus_id}.")
+        return pd.DataFrame()
+
+    return pd.json_normalize(raw_works)
+
+
+# ---------------------------------------------------------------------------
+# 2)  Scopus-raw ➜ canonical DataFrame
+# ---------------------------------------------------------------------------
+
+_CANON_COLS: list[str] = [
+    "title", "authors", "journal", "year",
+    "doi", "issn", "source", "citations", "url",
+]
+
+_EXTRA_COLS: list[str] = [
+    "volume", "issue", "page_start", "page_end", "page_count",
+    "publisher", "links", "scopus_pub_id", "work_type",
+]
+
+
+def _format_issn(code: Any) -> str | None:
+    """Cleans and formats an ISSN code to the standard ####-#### format."""
+    if isinstance(code, str):
+        cleaned = re.sub(r"[^0-9X]", "", code.upper())
+        if len(cleaned) == 8:
+            return f"{cleaned[:4]}-{cleaned[4:]}"
+    return None
+
+
+def _parse_scopus_authors(author_list: Any) -> list[str]:
+    """Extracts a list of author names from the Scopus 'author' field."""
+    if not isinstance(author_list, list):
+        return []
+    names = []
+    for a in author_list:
+        if isinstance(a, dict) and (name := a.get("ce:indexed-name")):
+            names.append(name)
+    return names
+
+
+def _scopus_to_canonical(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Coerces the raw DataFrame from the Scopus API into the canonical schema."""
+    if raw_df.empty:
+        return pd.DataFrame(columns=_CANON_COLS + _EXTRA_COLS)
+
+    df = raw_df.copy()
+
+    colmap = {
+        "dc:title": "title",
+        "author": "authors",
+        "prism:publicationName": "journal",
+        "citedby-count": "citations",
+        "prism:coverDate": "year",
+        "prism:url": "url",
+        "prism:volume": "volume",
+        "prism:issueIdentifier": "issue",
+        "prism:doi": "doi",
+        "eid": "scopus_pub_id",
+        "subtypeDescription": "work_type",
+        "prism:issn": "issn_raw",
+        "prism:eIssn": "eissn_raw",
+        "prism:pageRange": "page_range",
+        "prism:publisher": "publisher",
+    }
+    df = df.rename(columns=colmap)
+
+    # --- Clean and transform columns ---
+    df["title"] = df["title"].astype(str).str.strip().str.lower()
+    df["authors"] = df["authors"].apply(_parse_scopus_authors)
+    df["year"] = pd.to_datetime(df["year"], errors="coerce").dt.year.astype("Int64")
+    df["citations"] = pd.to_numeric(df["citations"], errors="coerce").fillna(0).astype(int)
+    df["doi"] = df["doi"].astype(str).str.strip().str.lower().replace("", None)
+    df["source"] = "Scopus"
+
+    # --- Extract primary ISSN ---
+    df["issn"] = df.get("issn_raw", pd.Series(dtype=str)).apply(_format_issn)
+    df["eissn"] = df.get("eissn_raw", pd.Series(dtype=str)).apply(_format_issn)
+    df["issn"] = df["issn"].fillna(df["eissn"])
+
+    # --- Parse page information ---
+    def _parse_pages(page_range):
+        """Parse page range into start, end, and count"""
+        if not page_range or pd.isna(page_range):
+            return None, None, None
+        
+        page_str = str(page_range).strip()
+        if "-" in page_str:
+            parts = page_str.split("-")
+            if len(parts) == 2:
+                try:
+                    start = int(parts[0].strip())
+                    end = int(parts[1].strip())
+                    count = end - start + 1
+                    return start, end, count
+                except ValueError:
+                    pass
+        return None, None, None
+
+    if "page_range" in df.columns:
+        page_info = df["page_range"].apply(_parse_pages)
+        df["page_start"] = page_info.apply(lambda x: x[0] if x else None)
+        df["page_end"] = page_info.apply(lambda x: x[1] if x else None)
+        df["page_count"] = page_info.apply(lambda x: x[2] if x else None)
+    else:
+        df["page_start"] = None
+        df["page_end"] = None
+        df["page_count"] = None
+
+    # --- Add missing columns ---
+    df["links"] = df.apply(lambda row: [row["url"]] if pd.notna(row.get("url")) else [], axis=1)
+
+    # --- Deduplicate ---
+    initial_count = len(df)
+    df = df.sort_values("citations", ascending=False)
+    df = df.drop_duplicates(subset=["doi"], keep="first")
+    df = df.drop_duplicates(subset=["title", "year"], keep="first")
+    if len(df) < initial_count:
+        print(f"  Deduplicated {initial_count - len(df)} records. Remaining: {len(df)}")
+
+    # Ensure all canonical/extra columns exist
+    for col in _CANON_COLS + _EXTRA_COLS:
+        if col not in df.columns:
+            df[col] = None
+
+    return df[_CANON_COLS + _EXTRA_COLS].reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# 3)  Public API – the only function the rest of pubcrawler calls
+# ---------------------------------------------------------------------------
+
+
+def fetch(
+    scopus_id: str,
+    api_key: str,
+    *,
+    page_batch: int = 25,
+) -> List[Publication]:
+    """
+    Harvest publications for an author from Scopus using their Scopus ID and return them as a list
+    of :class:`pubcrawler.models.Publication`.
+
+    Parameters
+    ----------
+    scopus_id : str
+        The Scopus Author ID (numeric string).
+    api_key : str
+        Your Elsevier/Scopus API key.
+    page_batch : int, default 25
+        Number of results to fetch per API call.
+    """
+    # --- call the internal API client ------------------------------------
+    raw_df = _query_scopus_by_id(
+        scopus_id=scopus_id,
+        api_key=api_key,
+        page_batch=page_batch,
+    )
+
+    # --- clean / standardise ---------------------------------------------
+    canon_df = _scopus_to_canonical(raw_df)
+
+    # --- map into dataclass ----------------------------------------------
+    pubs: List[Publication] = []
+    for _, row in canon_df.iterrows():
+        pubs.append(
+            Publication(
+                title=row.title,
+                authors=row.authors,
+                journal=row.journal or None,
+                year=int(row.year) if pd.notna(row.year) else None,
+                doi=row.doi,
+                issn=row.issn,
+                source=row.source,  # "Scopus"
+                citations=int(row.citations),
+                url=row.url,
+            )
+        )
+
+    return sorted(pubs, key=lambda p: (p.year or 0, p.citations or 0), reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# 4)  CLI for quick manual test
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+
+    # --- Configuration for manual test ---
+    # IMPORTANT: Set your Scopus API key as an environment variable
+    # for this test to run.
+    # Load from .env file
+    load_dotenv()
+    SCOPUS_API_KEY = os.environ.get("SCOPUS_API_KEY")
+    SCOPUS_ID = "56518239200"  # Example Scopus ID - replace with actual ID
+
+    if not SCOPUS_API_KEY:
+        print("Error: SCOPUS_API_KEY environment variable not set.")
+        print("Please set it to your Elsevier API key to run this test.")
+    else:
+        print(f"Fetching Scopus data for Scopus ID: {SCOPUS_ID}...")
+        publications = fetch(
+            scopus_id=SCOPUS_ID,
+            api_key=SCOPUS_API_KEY,
+        )
+
+        print(f"\n✅ Fetched {len(publications)} publications from Scopus.")
+        if publications:
+            print("--- First 5 publications ---")
+            for p in publications[:5]:
+                print(f"  · {p.year} [{p.citations} citations] {p.title[:80]}")
+                print(f"    DOI: {p.doi or 'N/A'}, ISSN: {p.issn or 'N/A'}")

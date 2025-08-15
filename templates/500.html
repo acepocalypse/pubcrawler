@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Error - PubCrawler</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center">
+    <div class="text-center">
+        <div class="mb-8">
+            <div class="w-16 h-16 bg-black rounded-lg flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-book-open text-white text-xl"></i>
+            </div>
+            <h1 class="text-2xl font-light">Pub<span class="font-medium">Crawler</span></h1>
+        </div>
+        
+        <div class="mb-8">
+            <h2 class="text-6xl font-light text-gray-300 mb-4">500</h2>
+            <h3 class="text-xl font-medium text-gray-700 mb-2">Server Error</h3>
+            <p class="text-gray-600 max-w-md mx-auto">
+                Something went wrong on our end. Please try again later or contact support if the problem persists.
+            </p>
+        </div>
+        
+        <div class="space-x-4">
+            <a href="/" class="inline-flex items-center px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition">
+                <i class="fas fa-home mr-2"></i>
+                Return Home
+            </a>
+            <button onclick="location.reload()" class="inline-flex items-center px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">
+                <i class="fas fa-redo mr-2"></i>
+                Try Again
+            </button>
+        </div>
+    </div>
+</body>
+</html>

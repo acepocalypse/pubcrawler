@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PubCrawler - Publication Coverage Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'light-bg': '#f9fafb',
+                        'dark-bg': '#111827'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+            background-color: #f9fafb;
+        }
+        .database-icon {
+            transition: all 0.2s ease;
+        }
+        .database-icon.active {
+            transform: scale(1.1);
+        }
+        .publication-row:hover {
+            background-color: #f3f4f6;
+        }
+        .shadow-light {
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .spinner {
+            border: 3px solid #f3f3f6;
+            border-top: 3px solid #374151;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        @media (max-width: 768px) {
+            .responsive-table th {
+                display: none;
+            }
+            .responsive-table td {
+                display: flex;
+                padding: 0.75rem 1rem;
+                border-bottom: 1px solid #e5e7eb;
+            }
+            .responsive-table td::before {
+                content: attr(data-label);
+                font-weight: 500;
+                min-width: 100px;
+                padding-right: 1rem;
+                color: #4b5563;
+            }
+            .responsive-table tr {
+                display: block;
+                margin-bottom: 1rem;
+                border: 1px solid #e5e7eb;
+                border-radius: 0.5rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-light-bg text-gray-900 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm">
+        <div class="container mx-auto px-4 py-6 flex flex-col md:flex-row justify-between items-center">
+            <div class="flex items-center mb-4 md:mb-0">
+                <div class="w-10 h-10 bg-black rounded-lg flex items-center justify-center mr-3">
+                    <i class="fas fa-book-open text-white"></i>
+                </div>
+                <h1 class="text-2xl font-light tracking-tight">Pub<span class="font-medium">Crawler</span></h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="recent-searches" class="text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">
+                    <i class="fas fa-history mr-2"></i>Recent Searches
+                </button>
+                <button id="settings-btn" class="text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50">
+                    <i class="fas fa-cog mr-2"></i>Settings
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+        <!-- Search Section -->
+        <section class="mb-12">
+            <div class="max-w-3xl mx-auto">
+                <h2 class="text-3xl font-light text-center mb-6">Track Publication Coverage</h2>
+                <p class="text-gray-600 text-center mb-8 max-w-2xl mx-auto">
+                    Enter a researcher's name and at least one identifier (Google Scholar ID, Scopus ID, or affiliation) 
+                    to see their publications and which databases index each one. Coverage gaps are highlighted for quick identification.
+                </p>
+                
+                <div class="bg-white rounded-xl shadow-light p-6">
+                    <form id="search-form">
+                        <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
+                            <div class="flex-grow">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Researcher Name</label>
+                                <input 
+                                    type="text" 
+                                    id="researcher-name"
+                                    placeholder="e.g. John Smith" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                    required
+                                >
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Google Scholar ID (Optional)</label>
+                                <input 
+                                    type="text" 
+                                    id="google-scholar-id"
+                                    placeholder="e.g. ABC123def456" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                >
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Scopus ID (Optional)</label>
+                                <input 
+                                    type="text" 
+                                    id="scopus-id"
+                                    placeholder="e.g. 56518239200" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                >
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Affiliation (Optional)</label>
+                                <input 
+                                    type="text" 
+                                    id="affiliation"
+                                    placeholder="e.g. MIT, Harvard University" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                >
+                            </div>
+                        </div>
+
+                        <!-- API Keys Section (Collapsible) -->
+                        <div class="mt-4">
+                            <button type="button" id="api-keys-toggle" class="flex items-center text-sm font-medium text-gray-700 hover:text-gray-900">
+                                <i class="fas fa-key mr-2"></i>
+                                API Keys (Optional)
+                                <i class="fas fa-chevron-down ml-2 transform transition-transform" id="api-keys-chevron"></i>
+                            </button>
+                            <div id="api-keys-section" class="hidden mt-3 p-4 bg-gray-50 rounded-lg">
+                                <p class="text-sm text-gray-600 mb-3">
+                                    API keys are auto-populated from the configuration. You can override them here if needed.
+                                    Providing API keys enables access to Scopus and Web of Science databases for comprehensive coverage analysis.
+                                    Note: Scopus ID lookup works without an API key for public data, but an API key provides more detailed information.
+                                </p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Scopus API Key</label>
+                                        <input 
+                                            type="password" 
+                                            id="scopus-api-key"
+                                            placeholder="Auto-populated (or enter your own)" 
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Web of Science API Key</label>
+                                        <input 
+                                            type="password" 
+                                            id="wos-api-key"
+                                            placeholder="Auto-populated (or enter your own)" 
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                        >
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-6 flex justify-center">
+                            <button type="submit" id="search-btn" class="bg-black text-white px-8 py-3 rounded-lg hover:bg-gray-800 transition flex items-center justify-center">
+                                <i class="fas fa-search mr-2"></i> 
+                                <span id="search-btn-text">Find Publications</span>
+                                <div id="search-spinner" class="spinner ml-2 hidden"></div>
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div class="mt-6 flex flex-wrap gap-3">
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium mr-2">Filters:</span>
+                        </div>
+                        <select id="year-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5">
+                            <option value="All Years">All Years</option>
+                            <option value="2020-2023">2020-2023</option>
+                            <option value="2015-2019">2015-2019</option>
+                            <option value="Before 2015">Before 2015</option>
+                        </select>
+                        <select id="database-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5">
+                            <option value="All Databases">All Databases</option>
+                            <option value="All Three">All Three</option>
+                            <option value="Google Scholar Only">Google Scholar Only</option>
+                            <option value="Scopus Only">Scopus Only</option>
+                            <option value="Web of Science Only">Web of Science Only</option>
+                        </select>
+                        <select id="sort-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5">
+                            <option value="newest">Sort by: Newest First</option>
+                            <option value="oldest">Sort by: Oldest First</option>
+                            <option value="most_cited">Sort by: Most Cited</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Error Message -->
+        <div id="error-message" class="hidden max-w-3xl mx-auto mb-6">
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-exclamation-circle text-red-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800">Error</h3>
+                        <div class="mt-1 text-sm text-red-700" id="error-text"></div>
+                        <div id="error-suggestions" class="mt-2 text-sm text-red-600 hidden">
+                            <p class="font-medium">Suggestions:</p>
+                            <ul id="error-suggestions-list" class="list-disc list-inside mt-1"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <section id="results-section" class="hidden">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+                <h3 class="text-xl font-light mb-4 md:mb-0">
+                    Publications for: <span class="font-medium" id="researcher-display-name">-</span>
+                    <span class="text-gray-500 text-sm font-normal ml-2" id="researcher-info"></span>
+                </h3>
+                <div class="flex space-x-3">
+                    <button id="export-csv" class="text-sm px-4 py-2 border border-gray-300 rounded-lg flex items-center hover:bg-gray-50">
+                        <i class="fas fa-download mr-2"></i> Export CSV
+                    </button>
+                    <button id="print-btn" class="text-sm px-4 py-2 border border-gray-300 rounded-lg flex items-center hover:bg-gray-50">
+                        <i class="fas fa-print mr-2"></i> Print
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-light overflow-hidden">
+                <!-- Legend -->
+                <div class="border-b border-gray-200 px-6 py-3 flex flex-wrap items-center text-sm">
+                    <span class="text-gray-700 mr-4">Database Legend:</span>
+                    <div class="flex items-center mr-4">
+                        <div class="w-5 h-5 bg-gray-800 rounded-full flex items-center justify-center mr-2">
+                            <i class="fab fa-google text-white text-xs"></i>
+                        </div>
+                        <span>Google Scholar</span>
+                    </div>
+                    <div class="flex items-center mr-4">
+                        <div class="w-5 h-5 bg-red-600 rounded-full flex items-center justify-center mr-2">
+                            <i class="fas fa-database text-white text-xs"></i>
+                        </div>
+                        <span>Scopus</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center mr-2">
+                            <i class="fas fa-globe text-white text-xs"></i>
+                        </div>
+                        <span>Web of Science</span>
+                    </div>
+                </div>
+
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="w-full responsive-table">
+                        <thead class="bg-gray-50 text-left">
+                            <tr>
+                                <th class="py-3 px-6 font-medium text-gray-700">Title & Authors</th>
+                                <th class="py-3 px-6 font-medium text-gray-700">Year</th>
+                                <th class="py-3 px-6 font-medium text-gray-700">Journal</th>
+                                <th class="py-3 px-6 font-medium text-gray-700">DOI</th>
+                                <th class="py-3 px-6 font-medium text-gray-700 text-center">Citations</th>
+                                <th class="py-3 px-6 font-medium text-gray-700 text-center">Coverage</th>
+                            </tr>
+                        </thead>
+                        <tbody id="publications-table-body" class="divide-y divide-gray-200">
+                            <!-- Publications will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Summary -->
+                <div class="border-t border-gray-200 px-6 py-4 flex flex-wrap items-center text-sm bg-gray-50">
+                    <div class="mr-6">
+                        <span class="text-gray-700 mr-2">Total Publications:</span>
+                        <span class="font-medium" id="total-publications">0</span>
+                    </div>
+                    <div class="mr-6">
+                        <span class="text-gray-700 mr-2">Average Coverage:</span>
+                        <span class="font-medium" id="average-coverage">0%</span>
+                    </div>
+                    <div class="mr-6">
+                        <span class="text-gray-700 mr-2">Sources Used:</span>
+                        <span class="font-medium" id="sources-used">-</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 mt-12">
+        <div class="container mx-auto px-4 py-8">
+            <div class="flex flex-col md:flex-row justify-between">
+                <div class="mb-6 md:mb-0">
+                    <div class="flex items-center">
+                        <div class="w-8 h-8 bg-black rounded-lg flex items-center justify-center mr-3">
+                            <i class="fas fa-book-open text-white"></i>
+                        </div>
+                        <h3 class="text-lg font-light">Pub<span class="font-medium">Crawler</span></h3>
+                    </div>
+                    <p class="text-gray-600 text-sm mt-2 max-w-xs">
+                        Track publication coverage across academic databases in one place.
+                    </p>
+                </div>
+                
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-8">
+                    <div>
+                        <h4 class="text-sm font-semibold mb-3">Resources</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">Documentation</a></li>
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">API Access</a></li>
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">Help Center</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-semibold mb-3">Our Group</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">About</a></li>
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">Blog</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-semibold mb-3">Legal</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">Privacy</a></li>
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">Terms</a></li>
+                            <li><a href="#" class="text-gray-600 hover:text-gray-900">Cookies</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="border-t border-gray-200 mt-8 pt-8 text-sm text-gray-600 flex flex-col md:flex-row justify-between items-center">
+                <div class="mb-4 md:mb-0">
+                    © 2025 PubCrawler. All rights reserved.
+                </div>
+                <div class="flex space-x-6">
+                    <a href="#" class="hover:text-gray-900"><i class="fab fa-twitter"></i></a>
+                    <a href="#" class="hover:text-gray-900"><i class="fab fa-linkedin"></i></a>
+                    <a href="#" class="hover:text-gray-900"><i class="fab fa-github"></i></a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Global variables
+        let currentSearchResults = null;
+
+        // DOM elements
+        const searchForm = document.getElementById('search-form');
+        const searchBtn = document.getElementById('search-btn');
+        const searchBtnText = document.getElementById('search-btn-text');
+        const searchSpinner = document.getElementById('search-spinner');
+        const errorMessage = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+        const resultsSection = document.getElementById('results-section');
+        const apiKeysToggle = document.getElementById('api-keys-toggle');
+        const apiKeysSection = document.getElementById('api-keys-section');
+        const apiKeysChevron = document.getElementById('api-keys-chevron');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeEventListeners();
+        });
+
+        function initializeEventListeners() {
+            // Search form submission
+            searchForm.addEventListener('submit', handleSearch);
+
+            // API keys toggle
+            apiKeysToggle.addEventListener('click', toggleApiKeysSection);
+
+            // Filter changes
+            document.getElementById('year-filter').addEventListener('change', applyFilters);
+            document.getElementById('database-filter').addEventListener('change', applyFilters);
+            document.getElementById('sort-filter').addEventListener('change', applyFilters);
+
+            // Export button
+            document.getElementById('export-csv').addEventListener('click', exportToCSV);
+
+            // Print button
+            document.getElementById('print-btn').addEventListener('click', () => window.print());
+
+            // Recent searches
+            document.getElementById('recent-searches').addEventListener('click', showRecentSearches);
+
+            // Settings
+            document.getElementById('settings-btn').addEventListener('click', showSettings);
+        }
+
+        function toggleApiKeysSection() {
+            const isHidden = apiKeysSection.classList.contains('hidden');
+            if (isHidden) {
+                apiKeysSection.classList.remove('hidden');
+                apiKeysChevron.style.transform = 'rotate(180deg)';
+            } else {
+                apiKeysSection.classList.add('hidden');
+                apiKeysChevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        async function handleSearch(event) {
+            event.preventDefault();
+
+            const researcherName = document.getElementById('researcher-name').value.trim();
+            if (!researcherName) {
+                showError('Please enter a researcher name');
+                return;
+            }
+
+            setSearchLoading(true);
+            hideError();
+            hideResults();
+
+            try {
+                const searchData = {
+                    researcher_name: researcherName,
+                    google_scholar_id: document.getElementById('google-scholar-id').value.trim(),
+                    scopus_id: document.getElementById('scopus-id').value.trim(),
+                    affiliation: document.getElementById('affiliation').value.trim(),
+                    api_keys: {
+                        scopus_api_key: document.getElementById('scopus-api-key').value.trim(),
+                        wos_api_key: document.getElementById('wos-api-key').value.trim()
+                    },
+                    filters: {
+                        year_range: document.getElementById('year-filter').value,
+                        database: document.getElementById('database-filter').value,
+                        sort_by: document.getElementById('sort-filter').value
+                    }
+                };
+
+                const response = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(searchData)
+                });
+
+                if (!response.ok) {
+                    const result = await response.json();
+                    throw new Error(result.error || 'Search failed');
+                }
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Search failed');
+                }
+
+                currentSearchResults = result;
+                displayResults(result);
+
+            } catch (error) {
+                console.error('Search error:', error);
+                
+                // Try to parse error response for suggestions
+                let suggestions = null;
+                try {
+                    const errorResponse = JSON.parse(error.message);
+                    if (errorResponse.suggestions) {
+                        suggestions = errorResponse.suggestions;
+                    }
+                } catch (e) {
+                    // Error message is not JSON, use as-is
+                }
+                
+                showError(error.message || 'An error occurred during search', suggestions);
+            } finally {
+                setSearchLoading(false);
+            }
+        }
+
+        function setSearchLoading(loading) {
+            if (loading) {
+                searchBtn.disabled = true;
+                searchBtn.classList.add('loading');
+                searchBtnText.textContent = 'Searching...';
+                searchSpinner.classList.remove('hidden');
+            } else {
+                searchBtn.disabled = false;
+                searchBtn.classList.remove('loading');
+                searchBtnText.textContent = 'Find Publications';
+                searchSpinner.classList.add('hidden');
+            }
+        }
+
+        function showError(message, suggestions = null) {
+            const errorTextEl = document.getElementById('error-text');
+            const errorSuggestionsEl = document.getElementById('error-suggestions');
+            const errorSuggestionsListEl = document.getElementById('error-suggestions-list');
+            
+            errorTextEl.textContent = message;
+            
+            if (suggestions && suggestions.length > 0) {
+                errorSuggestionsListEl.innerHTML = '';
+                suggestions.forEach(suggestion => {
+                    const li = document.createElement('li');
+                    li.textContent = suggestion;
+                    errorSuggestionsListEl.appendChild(li);
+                });
+                errorSuggestionsEl.classList.remove('hidden');
+            } else {
+                errorSuggestionsEl.classList.add('hidden');
+            }
+            
+            errorMessage.classList.remove('hidden');
+            // Scroll to error
+            errorMessage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function hideError() {
+            errorMessage.classList.add('hidden');
+        }
+
+        function displayResults(data) {
+            // Update header information
+            document.getElementById('researcher-display-name').textContent = data.researcher.name;
+            
+            let infoText = '';
+            if (data.researcher.affiliation) {
+                infoText += `Affiliation: ${data.researcher.affiliation}`;
+            }
+            if (data.researcher.gs_id) {
+                infoText += `${infoText ? ' • ' : ''}Google Scholar ID: ${data.researcher.gs_id}`;
+            }
+            document.getElementById('researcher-info').textContent = infoText;
+
+            // Update summary
+            document.getElementById('total-publications').textContent = data.summary.total_publications;
+            document.getElementById('sources-used').textContent = data.summary.sources_used.join(', ');
+            
+            const avgCoverage = data.summary.coverage_report?.average_coverage || 0;
+            document.getElementById('average-coverage').textContent = `${Math.round(avgCoverage * 100)}%`;
+
+            // Show unique publication count if available (debug mode)
+            if (data.summary.unique_publications && data.summary.unique_publications !== data.summary.total_publications) {
+                const totalPubsElement = document.getElementById('total-publications');
+                totalPubsElement.innerHTML = `${data.summary.total_publications} <span class="text-sm text-gray-500">(${data.summary.unique_publications} unique)</span>`;
+            }
+
+            // Clear and populate table
+            const tableBody = document.getElementById('publications-table-body');
+            tableBody.innerHTML = '';
+
+            data.publications.forEach(pub => {
+                const row = createPublicationRow(pub);
+                tableBody.appendChild(row);
+            });
+
+            // Show results
+            resultsSection.classList.remove('hidden');
+            resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function createPublicationRow(pub) {
+            const row = document.createElement('tr');
+            row.className = 'publication-row';
+
+            // Format authors
+            const authorsText = pub.authors ? pub.authors.slice(0, 4).join(', ') + 
+                (pub.authors.length > 4 ? `, et al.` : '') : 'No authors listed';
+
+            // Coverage icons with coverage score
+            const coverageCount = (pub.coverage.google_scholar ? 1 : 0) + 
+                                (pub.coverage.scopus ? 1 : 0) + 
+                                (pub.coverage.wos ? 1 : 0);
+            const coveragePercentage = Math.round((coverageCount / 3) * 100);
+            
+            const coverageHtml = `
+                <div class="flex flex-col items-center space-y-2">
+                    <div class="flex justify-center space-x-2">
+                        <div class="database-icon ${pub.coverage.google_scholar ? 'active' : ''} w-6 h-6 ${pub.coverage.google_scholar ? 'bg-gray-800' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="Google Scholar">
+                            <i class="fab fa-google ${pub.coverage.google_scholar ? 'text-white' : 'text-gray-400'} text-xs"></i>
+                        </div>
+                        <div class="database-icon ${pub.coverage.scopus ? 'active' : ''} w-6 h-6 ${pub.coverage.scopus ? 'bg-red-600' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="Scopus">
+                            <i class="fas fa-database ${pub.coverage.scopus ? 'text-white' : 'text-gray-400'} text-xs"></i>
+                        </div>
+                        <div class="database-icon ${pub.coverage.wos ? 'active' : ''} w-6 h-6 ${pub.coverage.wos ? 'bg-blue-600' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="Web of Science">
+                            <i class="fas fa-globe ${pub.coverage.wos ? 'text-white' : 'text-gray-400'} text-xs"></i>
+                        </div>
+                    </div>
+                    <div class="text-xs ${coverageCount === 3 ? 'text-green-600 font-medium' : coverageCount === 2 ? 'text-yellow-600' : 'text-red-600'}">${coverageCount}/3 databases</div>
+                </div>
+            `;
+
+            // DOI link
+            const doiHtml = pub.doi ? 
+                `<a href="https://doi.org/${pub.doi}" target="_blank" class="text-blue-600 hover:underline text-sm">${pub.doi}</a>` : 
+                '<span class="text-gray-400 text-sm">No DOI</span>';
+
+            row.innerHTML = `
+                <td data-label="Title & Authors" class="py-4 px-6">
+                    <div class="font-medium">${pub.title || 'Untitled'}</div>
+                    <div class="text-sm text-gray-600 mt-1">${authorsText}</div>
+                </td>
+                <td data-label="Year" class="py-4 px-6">${pub.year || 'N/A'}</td>
+                <td data-label="Journal" class="py-4 px-6">${pub.journal || 'Unknown'}</td>
+                <td data-label="DOI" class="py-4 px-6">${doiHtml}</td>
+                <td data-label="Citations" class="py-4 px-6 text-center">${pub.citations || 0}</td>
+                <td data-label="Coverage" class="py-4 px-6">${coverageHtml}</td>
+            `;
+
+            return row;
+        }
+
+        function applyFilters() {
+            if (!currentSearchResults) return;
+
+            // Re-trigger search with new filters (simplified for demo)
+            // In a full implementation, you might want to filter client-side for better UX
+            console.log('Filters changed - would re-search with new filters');
+        }
+
+        function hideResults() {
+            resultsSection.classList.add('hidden');
+        }
+
+        async function exportToCSV() {
+            if (!currentSearchResults) return;
+
+            try {
+                const response = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        publications: currentSearchResults.publications,
+                        format: 'csv'
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Export failed');
+                }
+
+                // Trigger download
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `publications_${new Date().toISOString().slice(0,10)}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+            } catch (error) {
+                console.error('Export error:', error);
+                showError('Export failed. Please try again.');
+            }
+        }
+
+        function showRecentSearches() {
+            alert('Recent searches feature coming soon!');
+        }
+
+        function showSettings() {
+            alert('Settings panel coming soon!');
+        }
+    </script>
+</body>
+</html>
