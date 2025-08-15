@@ -41,13 +41,13 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'pubcrawler-dev-key-chan
 
 
 def _normalize_text(text: str) -> str:
-    """Normalize text for better fuzzy matching."""
+    """Normalize text for better fuzzy matching (preserves original text)."""
     if not text:
         return ""
     
     import re
     
-    # Convert to lowercase and strip
+    # Convert to lowercase and strip for matching only
     normalized = text.lower().strip()
     
     # Remove extra whitespace and normalize spacing
@@ -574,7 +574,6 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
             source_citations['wos'] = clean_value(pub.citations) or 0
         
         # If we have all publications, check for duplicates across sources using fuzzy matching
-        # (This handles cases where deduplication might have missed some matches)
         if all_publications:
             # Find publications that match this one using multiple criteria
             matching_pubs = []
@@ -582,10 +581,6 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
             for other_pub in all_publications:
                 # Skip if comparing with itself
                 if pub is other_pub:
-                    continue
-                
-                # Skip if the other publication also has multiple sources (already processed)
-                if 'multiple sources:' in other_pub.source.lower():
                     continue
                 
                 # Method 1: Exact DOI match (highest priority)
@@ -604,15 +599,42 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
                 other_source_lower = match_pub.source.lower() if match_pub.source else ""
                 match_citations = clean_value(match_pub.citations) or 0
                 
-                if 'google scholar' in other_source_lower:
-                    coverage['google_scholar'] = True
-                    source_citations['google_scholar'] = match_citations
-                elif 'scopus' in other_source_lower:
-                    coverage['scopus'] = True
-                    source_citations['scopus'] = match_citations
-                elif 'web of science' in other_source_lower or 'wos' in other_source_lower:
-                    coverage['wos'] = True
-                    source_citations['wos'] = match_citations
+                # Handle both single sources AND already-merged sources
+                if 'multiple sources:' in other_source_lower:
+                    # Parse merged sources to extract individual source information
+                    import re
+                    
+                    if 'google scholar' in other_source_lower and not coverage['google_scholar']:
+                        coverage['google_scholar'] = True
+                        # Extract citation count for Google Scholar
+                        match = re.search(r'google scholar \((\d+) cites?\)', other_source_lower)
+                        if match:
+                            source_citations['google_scholar'] = int(match.group(1))
+                    
+                    if 'scopus' in other_source_lower and not coverage['scopus']:
+                        coverage['scopus'] = True
+                        # Extract citation count for Scopus
+                        match = re.search(r'scopus \((\d+) cites?\)', other_source_lower)
+                        if match:
+                            source_citations['scopus'] = int(match.group(1))
+                    
+                    if ('web of science' in other_source_lower or 'wos' in other_source_lower) and not coverage['wos']:
+                        coverage['wos'] = True
+                        # Extract citation count for Web of Science
+                        match = re.search(r'(?:web of science|wos) \((\d+) cites?\)', other_source_lower)
+                        if match:
+                            source_citations['wos'] = int(match.group(1))
+                else:
+                    # Handle single sources
+                    if 'google scholar' in other_source_lower and not coverage['google_scholar']:
+                        coverage['google_scholar'] = True
+                        source_citations['google_scholar'] = match_citations
+                    elif 'scopus' in other_source_lower and not coverage['scopus']:
+                        coverage['scopus'] = True
+                        source_citations['scopus'] = match_citations
+                    elif ('web of science' in other_source_lower or 'wos' in other_source_lower) and not coverage['wos']:
+                        coverage['wos'] = True
+                        source_citations['wos'] = match_citations
     
     # Clean and format all values for JSON
     formatted_pub = {

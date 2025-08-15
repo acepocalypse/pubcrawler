@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import sys
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 # Avoid hard dependencies at import time; import where needed.
 try:
@@ -28,77 +28,6 @@ except ImportError:
     # Allow running this file as a script for debugging (python aggregate.py)
     from models import Author, Publication  # type: ignore
     from coverage import analyze_publication_coverage, print_coverage_report  # type: ignore
-
-
-def _deduplicate_publications(publications: List[Publication]) -> List[Publication]:
-    """
-    Deduplicate a list of publications using sophisticated matching algorithms.
-
-    The strategy is as follows:
-    1. Group publications by a sanitized DOI. Publications with a valid DOI are
-       considered unique. The one with the highest citation count is kept.
-    2. For publications without a DOI, group them by a combination of year and a
-       fuzzy-matched title.
-    3. The representative from each group is chosen based on citation count.
-    
-    Parameters
-    ----------
-    publications : List[Publication]
-        List of publications to deduplicate.
-        
-    Returns
-    -------
-    List[Publication]
-        Deduplicated list of publications, sorted by year and citations.
-    """
-    if not publications:
-        return []
-
-    # Clean all publications first to handle any NaN values
-    cleaned_pubs = [_clean_publication_data(pub) for pub in publications]
-
-    # Try to use pandas/rapidfuzz for strong dedup; otherwise do a minimal fallback.
-    try:
-        import pandas as pd  # type: ignore
-        from rapidfuzz import fuzz, process  # type: ignore
-        return _advanced_deduplication(cleaned_pubs, pd, fuzz, process)
-    except ImportError:
-        print("⚠️ Advanced deduplication unavailable (missing pandas/rapidfuzz). Using basic deduplication.")
-        return _basic_deduplication(cleaned_pubs)
-
-
-def _basic_deduplication(publications: List[Publication]) -> List[Publication]:
-    """
-    Basic deduplication using exact matches only.
-    
-    Fallback method when pandas/rapidfuzz are not available.
-    """
-    by_doi: Dict[str, Publication] = {}
-    remaining: List[Publication] = []
-    
-    for pub in publications:
-        # Clean the publication data first
-        cleaned_pub = _clean_publication_data(pub)
-        
-        if cleaned_pub.doi:
-            existing = by_doi.get(cleaned_pub.doi)
-            if existing is None or (cleaned_pub.citations or 0) > (existing.citations or 0):
-                by_doi[cleaned_pub.doi] = cleaned_pub
-        else:
-            remaining.append(cleaned_pub)
-    
-    # Naive dedup by (title, year)
-    seen = set()
-    result = list(by_doi.values())
-    for pub in sorted(remaining, key=lambda x: (x.citations or 0), reverse=True):
-        key = (pub.title, pub.year)
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(pub)
-    
-    # Sort by year (descending) then citations (descending)
-    return sorted(result, key=lambda p: (p.year or 0, p.citations or 0), reverse=True)
 
 
 def _clean_publication_data(pub: Publication) -> Publication:
@@ -146,290 +75,33 @@ def _clean_publication_data(pub: Publication) -> Publication:
     )
 
 
-def _advanced_deduplication(publications: List[Publication], pd, fuzz, process) -> List[Publication]:
-    """
-    Advanced deduplication using pandas and fuzzy string matching.
-    Enhanced to handle cross-database matching more effectively, including
-    fuzzy matching between publications with and without DOIs.
-    """
-    df = pd.DataFrame([p.__dict__ for p in publications])
-    df['doi'] = df['doi'].str.lower().str.strip().replace('', None)
-    df['citations'] = pd.to_numeric(df['citations'], errors='coerce').fillna(0)
-    df = df.sort_values('citations', ascending=False).reset_index(drop=True)
-
-    # --- Step 1: Comprehensive deduplication using both DOI and fuzzy matching ---
-    unique_pubs = []
-    processed_indices = set()
-
-    for idx, pub_row in df.iterrows():
-        if idx in processed_indices:
-            continue
-        
-        # Find all potential matches (both DOI and fuzzy)
-        potential_matches = []
-        
-        for other_idx, other_row in df.iterrows():
-            if other_idx <= idx or other_idx in processed_indices:
-                continue
-            
-            # Check for DOI match first (highest priority)
-            if (pub_row['doi'] and other_row['doi'] and 
-                pub_row['doi'] == other_row['doi']):
-                potential_matches.append(other_idx)
-            # Then check for fuzzy match (including DOI vs no-DOI cases)
-            elif _is_fuzzy_match(pub_row, other_row, fuzz):
-                potential_matches.append(other_idx)
-        
-        # Create merged publication with source information
-        merged_pub = _merge_duplicate_sources(pub_row, df, potential_matches)
-        unique_pubs.append(merged_pub)
-        
-        # Mark all matches as processed
-        processed_indices.add(idx)
-        for match_idx in potential_matches:
-            processed_indices.add(match_idx)
-
-    # Convert back to dataframe and sort
-    final_df = pd.DataFrame(unique_pubs)
-    if not final_df.empty:
-        # Clean up NaN values before converting to Publication objects
-        final_df = _clean_dataframe_for_json(final_df, pd)
-        final_df = final_df.sort_values(['year', 'citations'], ascending=[False, False])
-        
-        # Convert back to Publication objects, excluding internal tracking fields
-        valid_fields = {
-            'title', 'authors', 'journal', 'year', 'doi', 'issn', 
-            'source', 'citations', 'url'
-        }
-        
-        final_pubs = []
-        for idx, row in final_df.iterrows():
-            # Convert row to dict
-            row_dict = row.to_dict()
-            
-            # Only include fields that are valid for Publication constructor
-            pub_data = {k: v for k, v in row_dict.items() if k in valid_fields}
-            
-            # Handle NaN values that might cause issues
-            for key, value in pub_data.items():
-                # Handle different data types appropriately
-                if key == 'authors':
-                    # Authors should be a list
-                    if value is None or (hasattr(value, '__len__') and len(value) == 0):
-                        pub_data[key] = []
-                    elif isinstance(value, str):
-                        pub_data[key] = [value]
-                    elif isinstance(value, list):
-                        pub_data[key] = [str(item) for item in value if item is not None]
-                    else:
-                        pub_data[key] = []
-                elif isinstance(value, (list, tuple, set)):
-                    # Handle unexpected arrays/lists for non-author fields
-                    if len(value) > 0:
-                        pub_data[key] = value[0]  # Take first element
-                    else:
-                        pub_data[key] = None
-                else:
-                    # Handle scalar values
-                    try:
-                        is_na = pd.isna(value)
-                    except (ValueError, TypeError):
-                        # If pd.isna() fails, treat as not-NA
-                        is_na = value is None
-                    
-                    if is_na:
-                        if key == 'citations':
-                            pub_data[key] = 0
-                        elif key in ['year']:
-                            pub_data[key] = None
-                        elif key in ['title', 'source']:
-                            pub_data[key] = ""
-                        else:
-                            pub_data[key] = None
-            
-            final_pubs.append(Publication(**pub_data))
-        
-    else:
-        final_pubs = []
-    
-    return final_pubs
-
-
-def _clean_dataframe_for_json(df, pd):
-    """Clean DataFrame by replacing NaN/None values appropriately for JSON serialization."""
-    import numpy as np
-    
-    # Replace NaN with None for optional string fields
-    string_fields = ['doi', 'issn', 'journal', 'url']
-    for field in string_fields:
-        if field in df.columns:
-            # Use a safer method to replace NaN values
-            df[field] = df[field].apply(lambda x: None if _is_empty_value(x) else x)
-    
-    # Handle year field specially
-    if 'year' in df.columns:
-        df['year'] = df['year'].apply(lambda x: None if _is_empty_value(x) else (int(x) if x is not None else None))
-    
-    # Handle citations field
-    if 'citations' in df.columns:
-        df['citations'] = df['citations'].apply(lambda x: 0 if _is_empty_value(x) else int(x))
-    
-    # Ensure authors is always a list
-    if 'authors' in df.columns:
-        df['authors'] = df['authors'].apply(lambda x: x if isinstance(x, list) and len(x) > 0 else [])
-    
-    # Handle title field
-    if 'title' in df.columns:
-        df['title'] = df['title'].apply(lambda x: str(x) if not _is_empty_value(x) else "")
-    
-    # Handle source field
-    if 'source' in df.columns:
-        df['source'] = df['source'].apply(lambda x: str(x) if not _is_empty_value(x) else "Unknown")
-    
-    return df
-
-
-def _is_fuzzy_match(pub1_row, pub2_row, fuzz) -> bool:
-    """
-    Determine if two publication rows are the same using comprehensive fuzzy matching.
-    This matches the logic used in app.py for consistency.
-    """
-    # Enhanced fuzzy matching
-    title_match = False
-    year_match = False
-    author_match = False
-    journal_match = False
-    
-    # Title matching with multiple strategies
-    if pub1_row['title'] and pub2_row['title']:
-        norm_title1 = _normalize_title_for_matching(pub1_row['title'])
-        norm_title2 = _normalize_title_for_matching(pub2_row['title'])
-        
-        title_ratio = fuzz.ratio(norm_title1, norm_title2)
-        token_ratio = fuzz.token_set_ratio(norm_title1, norm_title2)
-        partial_ratio = fuzz.partial_ratio(norm_title1, norm_title2)
-        
-        best_title_similarity = max(title_ratio, token_ratio, partial_ratio)
-        title_match = best_title_similarity >= 80
-        
-        # For very high similarity, be more confident
-        if best_title_similarity >= 95:
-            title_match = True
-    
-    # Year matching (allow 1 year difference for cross-database variations)
-    if pub1_row['year'] and pub2_row['year']:
-        year_match = abs(pub1_row['year'] - pub2_row['year']) <= 1
-    
-    # Author matching
-    if pub1_row['authors'] and pub2_row['authors']:
-        author_similarity = _calculate_author_similarity_for_dedup(pub1_row['authors'], pub2_row['authors'], fuzz)
-        author_match = author_similarity >= 0.3
-    
-    # Journal matching with enhanced normalization
-    if pub1_row['journal'] and pub2_row['journal']:
-        norm_journal1 = _normalize_title_for_matching(pub1_row['journal'])
-        norm_journal2 = _normalize_title_for_matching(pub2_row['journal'])
-        
-        # Handle common journal name variations
-        norm_journal1 = _normalize_journal_name(norm_journal1)
-        norm_journal2 = _normalize_journal_name(norm_journal2)
-        
-        journal_similarity = max(
-            fuzz.ratio(norm_journal1, norm_journal2),
-            fuzz.partial_ratio(norm_journal1, norm_journal2),
-            fuzz.token_set_ratio(norm_journal1, norm_journal2)
-        )
-        journal_match = journal_similarity >= 70
-    
-    # Confidence scoring with enhanced logic
-    confidence_score = 0
-    
-    # Title is the most important indicator
-    if title_match:
-        if best_title_similarity >= 95:
-            confidence_score += 4.0
-        elif best_title_similarity >= 90:
-            confidence_score += 3.5
-        elif best_title_similarity >= 85:
-            confidence_score += 3.0
-        else:
-            confidence_score += 2.5
-    
-    # Year matching adds confidence
-    if year_match:
-        confidence_score += 2.0
-    
-    # Author matching is important
-    if author_match:
-        confidence_score += 2.0
-    
-    # Journal matching provides additional confirmation
-    if journal_match:
-        confidence_score += 1.5
-    
-    # Decision logic - more flexible for cross-database variations
-    # High confidence match
-    if confidence_score >= 4.0:
+def _is_empty_value(value):
+    """Check if a value is empty, None, NaN, or otherwise should be considered missing."""
+    if value is None:
         return True
-    # Strong title + year combination (common for same paper)
-    elif title_match and year_match and confidence_score >= 3.5:
-        return True
-    # Very strong title match alone (for cases with missing data)
-    elif title_match and best_title_similarity >= 95 and confidence_score >= 3.0:
-        return True
-    # Title + authors match (good indicator)
-    elif title_match and author_match and confidence_score >= 3.0:
-        return True
-    # Title + journal match (also good indicator)
-    elif title_match and journal_match and confidence_score >= 3.0:
-        return True
+    
+    # Handle scalar values
+    try:
+        import pandas as pd
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError, ImportError):
+        # If pd.isna fails or pandas not available, check other conditions
+        pass
+    
+    # Handle string representations of missing values
+    if isinstance(value, str):
+        return value.strip() == '' or value.lower() in ['nan', 'none', 'null']
+    
+    # Handle lists/arrays
+    if isinstance(value, (list, tuple)):
+        return len(value) == 0
     
     return False
 
 
-def _normalize_journal_name(journal_name: str) -> str:
-    """Normalize journal names to handle common variations."""
-    if not journal_name:
-        return ""
-    
-    import re
-    
-    # Common journal name normalizations
-    normalized = journal_name.lower().strip()
-    
-    # Remove common suffixes that might differ
-    normalized = re.sub(r',?\s*\d{4}.*$', '', normalized)  # Remove year and everything after
-    normalized = re.sub(r'\s*\([^)]*\)$', '', normalized)  # Remove parentheses at end
-    
-    # Standardize common abbreviations
-    abbreviations = {
-        'oecologia': 'oecologia',
-        'ieee trans': 'ieee transactions',
-        'ieee transactions': 'ieee transactions',
-        'acm trans': 'acm transactions',
-        'acm transactions': 'acm transactions',
-        'proc natl acad sci': 'proceedings national academy sciences',
-        'pnas': 'proceedings national academy sciences',
-        'j exp biol': 'journal experimental biology',
-        'j comp physiol': 'journal comparative physiology',
-        'nature': 'nature',
-        'science': 'science',
-        'cell': 'cell',
-        'plos one': 'plos one',
-    }
-    
-    for abbrev, full in abbreviations.items():
-        if abbrev in normalized:
-            normalized = normalized.replace(abbrev, full)
-    
-    # Remove extra whitespace
-    normalized = re.sub(r'\s+', ' ', normalized).strip()
-    
-    return normalized
-
-
-def _normalize_title_for_matching(text: str) -> str:
-    """Normalize text for better fuzzy matching during deduplication."""
+def _normalize_text_for_matching(text: str) -> str:
+    """Enhanced text normalization for better fuzzy matching during deduplication."""
     if not text:
         return ""
     
@@ -447,7 +119,7 @@ def _normalize_title_for_matching(text: str) -> str:
     # Remove common prefixes/suffixes that might differ
     normalized = re.sub(r'\b(the|a|an)\b', '', normalized)
     
-    # Handle common abbreviations and variations
+    # Handle common abbreviations and variations - more comprehensive
     normalized = re.sub(r'\bvol\.?\s*', '', normalized)
     normalized = re.sub(r'\bno\.?\s*', '', normalized)
     normalized = re.sub(r'\bpp\.?\s*', '', normalized)
@@ -462,14 +134,17 @@ def _normalize_title_for_matching(text: str) -> str:
     # Remove years in parentheses or standalone
     normalized = re.sub(r'\b(19|20)\d{2}\b', '', normalized)
     
-    # Clean up multiple spaces created by removals
-    normalized = re.sub(r'\s+', ' ', normalized)
+    # Remove common suffixes that might differ - enhanced
+    normalized = re.sub(r'\b(abstract|full text|pdf|html|preprint|arxiv)\b', '', normalized)
     
-    return normalized.strip()
+    # Clean up multiple spaces created by removals
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    return normalized
 
 
-def _calculate_author_similarity_for_dedup(authors1, authors2, fuzz) -> float:
-    """Calculate similarity between two author lists during deduplication."""
+def _calculate_author_similarity(authors1: List[str], authors2: List[str]) -> float:
+    """Enhanced author similarity calculation with better handling of partial lists."""
     import re
     
     if not authors1 or not authors2:
@@ -481,15 +156,16 @@ def _calculate_author_similarity_for_dedup(authors1, authors2, fuzz) -> float:
     if isinstance(authors2, str):
         authors2 = [authors2]
     
-    # Normalize author names
+    # Normalize author names - enhanced
     def normalize_author(author):
         if not author:
             return ""
         
         normalized = author.lower().strip()
-        # Remove titles and suffixes
-        normalized = re.sub(r'\b(dr|prof|professor|phd|md|jr|sr|ii|iii)\b\.?', '', normalized)
-        # Remove extra spaces
+        # Remove titles and suffixes - more comprehensive
+        normalized = re.sub(r'\b(dr|prof|professor|phd|md|jr|sr|ii|iii|mr|ms|mrs)\b\.?', '', normalized)
+        # Remove extra spaces and punctuation
+        normalized = re.sub(r'[,.]', '', normalized)
         normalized = re.sub(r'\s+', ' ', normalized).strip()
         return normalized
     
@@ -503,159 +179,287 @@ def _calculate_author_similarity_for_dedup(authors1, authors2, fuzz) -> float:
     if not norm_authors1 or not norm_authors2:
         return 0.0
     
-    # Count matches using fuzzy matching
-    matches = 0
+    # Import fuzzy matching
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        # Fallback to basic string matching
+        matches = sum(1 for a1 in norm_authors1 for a2 in norm_authors2 if a1 == a2)
+        return matches / min(len(norm_authors1), len(norm_authors2)) if min(len(norm_authors1), len(norm_authors2)) > 0 else 0.0
     
+    # Strategy 1: First author matching (often most important)
+    first_author_match = False
+    if norm_authors1 and norm_authors2:
+        first_similarity = fuzz.ratio(norm_authors1[0], norm_authors2[0])
+        first_author_match = first_similarity >= 70  # Lowered threshold
+    
+    # Strategy 2: Count matches using fuzzy matching - lowered thresholds
+    matches = 0
     for author1 in norm_authors1:
-        best_match = 0
-        for author2 in norm_authors2:
-            similarity = fuzz.ratio(author1, author2)
-            best_match = max(best_match, similarity)
-        
-        if best_match >= 75:
+        best_match = max(fuzz.ratio(author1, author2) for author2 in norm_authors2)
+        if best_match >= 70:  # Lowered from 75
             matches += 1
     
-    # Calculate similarity based on shorter list (handle "et al." cases)
-    min_authors = min(len(norm_authors1), len(norm_authors2))
-    base_similarity = matches / min_authors if min_authors > 0 else 0.0
+    # Strategy 3: Handle "et al." cases more aggressively
+    shorter_len = min(len(norm_authors1), len(norm_authors2))
+    longer_len = max(len(norm_authors1), len(norm_authors2))
+    
+    if longer_len > shorter_len * 1.5:  # Lowered from 2
+        shorter_authors = norm_authors1 if len(norm_authors1) < len(norm_authors2) else norm_authors2
+        longer_authors = norm_authors2 if len(norm_authors1) < len(norm_authors2) else norm_authors1
+        
+        matched_short = sum(
+            1 for short_author in shorter_authors
+            if any(fuzz.ratio(short_author, long_author) >= 70 for long_author in longer_authors)
+        )
+        
+        if len(shorter_authors) > 0 and matched_short / len(shorter_authors) >= 0.6:  # Lowered from 0.7
+            return 0.75
+    
+    # Calculate final similarity
+    base_similarity = matches / shorter_len if shorter_len > 0 else 0.0
+    
+    # Boost score if first author matches well - increased boost
+    if first_author_match:
+        base_similarity = min(1.0, base_similarity + 0.25)  # Increased from 0.2
     
     return base_similarity
 
 
-
-def _merge_duplicate_sources(base_row, df, match_indices):
-    """Merge a publication with its fuzzy matches, combining source information and preserving citation data."""
-    import pandas as pd
-    import numpy as np
+def _publications_match(pub1: Publication, pub2: Publication) -> bool:
+    """Enhanced publication matching with multiple strategies and lower thresholds."""
+    # DOI match (highest priority)
+    if pub1.doi and pub2.doi:
+        doi1 = pub1.doi.lower().strip()
+        doi2 = pub2.doi.lower().strip()
+        if doi1 == doi2:
+            return True
     
-    merged_pub = base_row.to_dict()
+    # Skip if from the same source (shouldn't be duplicates within same source)
+    if pub1.source.lower() == pub2.source.lower():
+        return False
     
-    if match_indices:
-        # Collect all sources with their citation counts
-        source_citations = []
-        source_citations.append({
-            'source': base_row['source'],
-            'citations': base_row.get('citations', 0)
-        })
-        
-        for idx in match_indices:
-            match_row = df.loc[idx]
-            source_citations.append({
-                'source': match_row['source'],
-                'citations': match_row.get('citations', 0)
-            })
-        
-        # Create detailed source information
-        unique_sources = []
-        citation_details = {}
-        max_citations = 0
-        
-        for item in source_citations:
-            source = item['source']
-            citations = item['citations'] if not _is_empty_value(item['citations']) else 0
-            
-            if source not in [s['source'] for s in unique_sources]:
-                unique_sources.append({'source': source, 'citations': citations})
-                citation_details[source] = citations
-                max_citations = max(max_citations, citations)
-        
-        # Format source information with citation details
-        if len(unique_sources) > 1:
-            source_parts = []
-            for item in unique_sources:
-                source_parts.append(f"{item['source']} ({item['citations']} cites)")
-            merged_pub['source'] = f"Multiple sources: {', '.join(source_parts)}"
-            
-            # Store citation details for later use
-            merged_pub['_citation_details'] = citation_details
-        
-        # Use the highest citation count as the main citation count
-        merged_pub['citations'] = max_citations
-        
-        # Use the best available data from all matches
-        for idx in match_indices:
-            match_row = df.loc[idx]
-            
-            # Fill in missing DOI if available
-            current_doi = merged_pub.get('doi')
-            match_doi = match_row.get('doi')
-            if (_is_empty_value(current_doi)) and not _is_empty_value(match_doi):
-                merged_pub['doi'] = match_doi
-            
-            # Fill in missing URL if available (prefer DOI source)
-            current_url = merged_pub.get('url')
-            match_url = match_row.get('url')
-            if _is_empty_value(current_url) and not _is_empty_value(match_url):
-                merged_pub['url'] = match_url
-            elif (not _is_empty_value(match_doi) and not _is_empty_value(match_url) and 
-                  _is_empty_value(merged_pub.get('doi'))):
-                # Prefer URL from source that has DOI
-                merged_pub['url'] = match_url
-            
-            # Use more complete title if one is significantly longer
-            match_title = match_row.get('title', '')
-            current_title = merged_pub.get('title', '')
-            if not _is_empty_value(match_title) and len(str(match_title)) > len(str(current_title)):
-                merged_pub['title'] = match_title
-            
-            # Fill in missing year if available
-            current_year = merged_pub.get('year')
-            match_year = match_row.get('year')
-            if _is_empty_value(current_year) and not _is_empty_value(match_year):
-                merged_pub['year'] = match_year
-            
-            # Use more complete journal name if available
-            match_journal = match_row.get('journal', '')
-            current_journal = merged_pub.get('journal', '')
-            if (not _is_empty_value(match_journal) and 
-                (_is_empty_value(current_journal) or len(str(match_journal)) > len(str(current_journal)))):
-                merged_pub['journal'] = match_journal
+    # Import fuzzy matching
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        # Fallback to basic matching
+        return (pub1.title and pub2.title and
+                pub1.title.lower().strip() == pub2.title.lower().strip() and
+                pub1.year == pub2.year)
     
-    # Clean up any problematic values
-    for key, value in merged_pub.items():
-        if key != '_citation_details' and _is_empty_value(value):
-            if key in ['citations']:
-                merged_pub[key] = 0
-            elif key in ['authors']:
-                merged_pub[key] = []
-            else:
-                merged_pub[key] = None
+    # Enhanced fuzzy matching with multiple criteria
+    title_match = False
+    year_match = False
+    author_match = False
+    journal_match = False
+    best_title_similarity = 0
+    best_journal_similarity = 0  # <-- track journal similarity even below threshold
     
-    return merged_pub
-
-
-def _is_empty_value(value):
-    """Check if a value is empty, None, NaN, or otherwise should be considered missing."""
-    import pandas as pd
-    import numpy as np
+    # Title matching - multiple strategies with lower thresholds
+    if pub1.title and pub2.title:
+        norm_title1 = _normalize_text_for_matching(pub1.title)
+        norm_title2 = _normalize_text_for_matching(pub2.title)
+        
+        if norm_title1 and norm_title2:  # Only proceed if both titles exist after normalization
+            title_ratio = fuzz.ratio(norm_title1, norm_title2)
+            token_ratio = fuzz.token_set_ratio(norm_title1, norm_title2)
+            partial_ratio = fuzz.partial_ratio(norm_title1, norm_title2)
+            
+            best_title_similarity = max(title_ratio, token_ratio, partial_ratio)
+            title_match = best_title_similarity >= 75  # Lowered from 80
     
-    if value is None:
+    # Year matching (allow 1 year difference)
+    if pub1.year and pub2.year:
+        year_match = abs(pub1.year - pub2.year) <= 1
+    
+    # Author matching with improved algorithm
+    if pub1.authors and pub2.authors:
+        author_similarity = _calculate_author_similarity(pub1.authors, pub2.authors)
+        author_match = author_similarity >= 0.25  # Lowered from 0.3
+    
+    # Journal matching with lowered threshold
+    if pub1.journal and pub2.journal:
+        norm_journal1 = _normalize_text_for_matching(pub1.journal)
+        norm_journal2 = _normalize_text_for_matching(pub2.journal)
+        
+        if norm_journal1 and norm_journal2:
+            journal_similarity = max(
+                fuzz.ratio(norm_journal1, norm_journal2),
+                fuzz.partial_ratio(norm_journal1, norm_journal2),
+                fuzz.token_set_ratio(norm_journal1, norm_journal2)
+            )
+            best_journal_similarity = journal_similarity  # <-- store best journal similarity
+            journal_match = journal_similarity >= 65  # Lowered from 70
+    
+    # Explicit permissive rule: title ≈ 0.8, year ±1, journal ≈ 0.5 => match
+    if best_title_similarity >= 80 and year_match and best_journal_similarity >= 50:
         return True
     
-    # Handle scalar values
-    try:
-        if pd.isna(value):
-            return True
-    except (TypeError, ValueError):
-        # If pd.isna fails (e.g., on lists), check other conditions
-        pass
+    # Enhanced confidence scoring with more granular thresholds
+    confidence_score = 0
+    if title_match:
+        confidence_score += 3
+    if year_match:
+        confidence_score += 2
+    if author_match:
+        confidence_score += 2
+    if journal_match:
+        confidence_score += 1
     
-    # Handle string representations of missing values
-    if isinstance(value, str):
-        return value.strip() == '' or value.lower() in ['nan', 'none', 'null']
+    # More permissive matching criteria
+    is_match = (
+        confidence_score >= 4 or  # Lowered from 4.5
+        (title_match and year_match and confidence_score >= 3.5) or  # Lowered from 4
+        (title_match and (author_match or journal_match) and confidence_score >= 3) or  # Lowered from 3.5
+        # New: Very strong title match with any other indicator
+        (title_match and best_title_similarity >= 85 and (year_match or author_match or journal_match))
+    )
     
-    # Handle lists/arrays
-    if isinstance(value, (list, tuple)):
-        return len(value) == 0
+    # Debug logging for missed matches (only in debug mode)
+    if not is_match and title_match:
+        import os
+        if os.environ.get('PUBCRAWLER_DEBUG'):
+            print(f"🔍 Near miss - Title match but insufficient confidence:")
+            print(f"   Title1: {pub1.title[:60]}...")
+            print(f"   Title2: {pub2.title[:60]}...")
+            print(f"   Confidence: {confidence_score}, Title: {title_match}, Year: {year_match}, Author: {author_match}, Journal: {journal_match}")
     
-    # Handle numpy arrays
-    if hasattr(value, '__len__') and hasattr(value, 'dtype'):
-        try:
-            return np.isnan(value).all() if value.dtype.kind in 'fc' else len(value) == 0
-        except (TypeError, ValueError):
-            return len(value) == 0
+    return is_match
+
+
+def _merge_publications(publications: List[Publication]) -> Publication:
+    """Merge duplicate publications with enhanced source tracking."""
+    if not publications:
+        raise ValueError("Cannot merge empty list of publications")
     
-    return False
+    if len(publications) == 1:
+        return publications[0]
+    
+    # Sort by source priority and citation count for better merging
+    source_priority = {'google scholar': 3, 'scopus': 2, 'web of science': 1, 'wos': 1}
+    publications_sorted = sorted(
+        publications,
+        key=lambda p: (source_priority.get(p.source.lower(), 0), p.citations or 0),
+        reverse=True
+    )
+    
+    primary = publications_sorted[0]
+    
+    # Collect all sources with their citation counts
+    source_info = []
+    total_max_citations = 0
+    
+    for pub in publications_sorted:
+        source_name = pub.source
+        citations = pub.citations or 0
+        
+        # Clean up source name
+        if 'google scholar' in source_name.lower():
+            source_name = 'Google Scholar'
+        elif 'scopus' in source_name.lower():
+            source_name = 'Scopus'
+        elif 'web of science' in source_name.lower() or 'wos' in source_name.lower():
+            source_name = 'Web of Science'
+        
+        source_info.append(f"{source_name} ({citations} cites)")
+        total_max_citations = max(total_max_citations, citations)
+    
+    # Create merged source string
+    merged_source = f"Multiple sources: {', '.join(sorted(list(set(source_info))))}"
+    
+    # Use the best available data from all sources
+    merged_data = {
+        'title': primary.title,
+        'authors': primary.authors,
+        'journal': primary.journal,
+        'year': primary.year,
+        'doi': primary.doi,
+        'url': primary.url
+    }
+    
+    # Fill in missing data from other sources
+    for pub in publications_sorted[1:]:
+        for field in ['title', 'journal', 'year', 'doi', 'url']:
+            if not merged_data[field] and getattr(pub, field):
+                merged_data[field] = getattr(pub, field)
+        
+        # Use more complete author list
+        if pub.authors and len(pub.authors) > len(merged_data['authors'] or []):
+            merged_data['authors'] = pub.authors
+    
+    return Publication(
+        title=merged_data['title'],
+        authors=merged_data['authors'],
+        journal=merged_data['journal'],
+        year=merged_data['year'],
+        doi=merged_data['doi'],
+        issn=primary.issn,
+        source=merged_source,
+        citations=total_max_citations,
+        url=merged_data['url']
+    )
+
+
+def _deduplicate_publications(publications: List[Publication]) -> List[Publication]:
+    """
+    Deduplicate publications using enhanced fuzzy matching.
+    Single unified deduplication system that handles all cases.
+    """
+    if not publications:
+        return []
+
+    print(f"🔄 Starting deduplication of {len(publications)} publications...")
+    
+    # Clean all publications first
+    cleaned_pubs = [_clean_publication_data(pub) for pub in publications]
+    
+    # Group publications by source for analysis
+    by_source = {}
+    for pub in cleaned_pubs:
+        source = pub.source.lower()
+        if source not in by_source:
+            by_source[source] = []
+        by_source[source].append(pub)
+    
+    print(f"📊 Publications by source: {', '.join(f'{source}: {len(pubs)}' for source, pubs in by_source.items())}")
+    
+    unique_publications = []
+    processed_indices = set()
+    
+    for i, pub in enumerate(cleaned_pubs):
+        if i in processed_indices:
+            continue
+            
+        # Find all matching publications for this one
+        matches = [pub]
+        match_indices = {i}
+        
+        for j, other_pub in enumerate(cleaned_pubs[i+1:], start=i+1):
+            if j in processed_indices:
+                continue
+                
+            if _publications_match(pub, other_pub):
+                matches.append(other_pub)
+                match_indices.add(j)
+        
+        # Mark all matched publications as processed
+        processed_indices.update(match_indices)
+        
+        if len(matches) == 1:
+            # Single publication, no duplicates found
+            unique_publications.append(pub)
+        else:
+            # Multiple matches found - merge them
+            merged_pub = _merge_publications(matches)
+            unique_publications.append(merged_pub)
+            print(f"🔗 Merged {len(matches)} publications: '{merged_pub.title[:60]}...'")
+    
+    # Sort by year (descending) then citations (descending)
+    sorted_pubs = sorted(unique_publications, key=lambda p: (-(p.year or 0), -(p.citations or 0)))
+    
+    print(f"✅ Deduplication complete: {len(publications)} → {len(sorted_pubs)} publications")
+    return sorted_pubs
 
 
 def aggregate_publications(
@@ -814,25 +618,25 @@ Examples:
                        help="Author's first name")
     parser.add_argument("--last", dest="last_name", required=True,
                        help="Author's last name")
-    parser.add_argument("--affiliation", 
+    parser.add_argument("--affiliation",
                        help="Author's institutional affiliation")
-    parser.add_argument("--gs-id", dest="gs_id", 
+    parser.add_argument("--gs-id", dest="gs_id",
                        help="Google Scholar author ID")
     parser.add_argument("--scopus-id", dest="scopus_id",
                        help="Scopus author ID")
     
     # API keys
-    parser.add_argument("--scopus-key", dest="scopus_api_key", 
+    parser.add_argument("--scopus-key", dest="scopus_api_key",
                        default=os.environ.get("SCOPUS_API_KEY"),
                        help="Scopus API key (or set SCOPUS_API_KEY env var)")
-    parser.add_argument("--wos-key", dest="wos_api_key", 
+    parser.add_argument("--wos-key", dest="wos_api_key",
                        default=os.environ.get("WOS_API_KEY"),
                        help="Web of Science API key (or set WOS_API_KEY env var)")
     
     # Options
     parser.add_argument("--max-gs", dest="max_pubs_g_scholar", type=int, default=100,
                        help="Maximum publications to fetch from Google Scholar (default: 100)")
-    parser.add_argument("--headless", action="store_true", 
+    parser.add_argument("--headless", action="store_true",
                        help="Run Google Scholar scraping in headless mode")
     parser.add_argument("--no-coverage", action="store_true",
                        help="Skip index coverage analysis")
@@ -909,6 +713,8 @@ Examples:
         sys.exit(1)
     except Exception as e:
         print(f"\n❌ Error during aggregation: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
@@ -917,31 +723,32 @@ def _display_results(publications: List[Publication]) -> None:
     try:
         import pandas as pd  # type: ignore
         
-        results_df = pd.DataFrame([p.__dict__ for p in publications])
+        results_df = pd.DataFrame([p.to_dict() for p in publications])
         
         print("\n--- Top 10 Publications (by Year, then Citations) ---")
-        display_cols = [c for c in ["year", "citations", "title", "doi", "source"] 
+        display_cols = [c for c in ["year", "citations", "title", "doi", "source"]
                        if c in results_df.columns]
         
         top_10 = results_df.head(10)[display_cols]
         # Truncate title for display
         if "title" in top_10.columns:
-            top_10["title"] = top_10["title"].str[:80] + "..."
+            top_10["title"] = top_10["title"].str.slice(0, 80).str.ljust(83, '.').str.slice(0, 83)
         
         print(top_10.to_string(index=False))
         
         print("\n--- Source Distribution ---")
-        source_counts = results_df['source'].value_counts()
+        # Handle merged sources
+        source_counts = results_df['source'].apply(lambda x: 'Multiple sources' if 'Multiple' in x else x).value_counts()
         for source, count in source_counts.items():
             print(f"  {source}: {count} publications")
             
         print(f"\n--- Summary Statistics ---")
         total_citations = results_df['citations'].sum()
         avg_citations = results_df['citations'].mean()
-        year_range = f"{results_df['year'].min()}-{results_df['year'].max()}"
+        year_range = f"{int(results_df['year'].min())}-{int(results_df['year'].max())}" if not results_df['year'].empty else "N/A"
         with_doi = results_df['doi'].notna().sum()
         
-        print(f"  Total citations: {total_citations:,}")
+        print(f"  Total citations: {int(total_citations):,}")
         print(f"  Average citations per paper: {avg_citations:.1f}")
         print(f"  Publication years: {year_range}")
         print(f"  Publications with DOI: {with_doi}/{len(results_df)} ({with_doi/len(results_df)*100:.1f}%)")
@@ -958,7 +765,8 @@ def _display_results(publications: List[Publication]) -> None:
         # Simple source count
         sources = {}
         for pub in publications:
-            sources[pub.source] = sources.get(pub.source, 0) + 1
+            source_key = 'Multiple sources' if 'Multiple' in pub.source else pub.source
+            sources[source_key] = sources.get(source_key, 0) + 1
         
         print("\n--- Source Distribution ---")
         for source, count in sources.items():

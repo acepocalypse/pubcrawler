@@ -64,7 +64,7 @@ class Publication:
     url: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Normalize DOI and title after initialization."""
+        """Normalize DOI after initialization."""
         # Sanitize DOI to be lowercase and remove common prefixes/suffixes
         if self.doi:
             self.doi = self.doi.lower().strip()
@@ -75,9 +75,9 @@ class Publication:
             if self.doi.endswith(('.pdf', '.html', '.xml')):
                 self.doi = '.'.join(self.doi.split('.')[:-1])
         
-        # Sanitize title
+        # Only strip whitespace from title, preserve original case and content
         if self.title:
-            self.title = self.title.strip().lower()
+            self.title = self.title.strip()
         
         # Ensure citations is at least 0
         if self.citations is None:
