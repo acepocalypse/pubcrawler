@@ -654,6 +654,12 @@
             if (data.researcher.gs_id) {
                 infoText += `${infoText ? ' • ' : ''}Google Scholar ID: ${data.researcher.gs_id}`;
             }
+            if (data.researcher.scopus_id) {
+                infoText += `${infoText ? ' • ' : ''}Scopus ID: ${data.researcher.scopus_id}`;
+            }
+            if (data.researcher.orcid_id) {
+                infoText += `${infoText ? ' • ' : ''}ORCID ID: ${data.researcher.orcid_id}`;
+            }
             document.getElementById('researcher-info').textContent = infoText;
 
             // Update summary

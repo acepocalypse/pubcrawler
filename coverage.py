@@ -32,6 +32,7 @@ class IndexingSource(Enum):
     GOOGLE_SCHOLAR = "Google Scholar"
     SCOPUS = "Scopus"
     WOS = "Web of Science"
+    ORCID = "ORCID"
 
 
 @dataclass
@@ -108,7 +109,28 @@ class CoverageAnalyzer:
             List of sources that were actually queried. If None, assumes all sources.
         """
         self.available_sources = available_sources or list(IndexingSource)
-        self.source_map = {source.value: source for source in IndexingSource}
+        
+        # Map both enum values and actual source names used in publications
+        self.source_map = {
+            # Enum values (from available_sources in app.py)
+            "Google Scholar": IndexingSource.GOOGLE_SCHOLAR,
+            "Scopus": IndexingSource.SCOPUS,
+            "Web of Science": IndexingSource.WOS,
+            "ORCID": IndexingSource.ORCID,
+            
+            # Actual source names used in publications
+            "Google Scholar": IndexingSource.GOOGLE_SCHOLAR,  # Same as enum
+            "Scopus": IndexingSource.SCOPUS,  # Same as enum
+            "WoS": IndexingSource.WOS,  # Different from enum!
+            "ORCID": IndexingSource.ORCID,  # Same as enum
+            
+            # Handle variations and case issues
+            "google scholar": IndexingSource.GOOGLE_SCHOLAR,
+            "scopus": IndexingSource.SCOPUS,
+            "wos": IndexingSource.WOS,
+            "web of science": IndexingSource.WOS,
+            "orcid": IndexingSource.ORCID,
+        }
     
     def analyze_coverage(self, publications: List[Publication]) -> List[EnhancedPublication]:
         """
@@ -165,20 +187,81 @@ class CoverageAnalyzer:
         source_metadata = {}
         
         for pub in group_publications:
-            if pub.source in self.source_map:
-                source_enum = self.source_map[pub.source]
-                indexed_sources.add(source_enum)
-                source_metadata[source_enum] = {
-                    'citations': pub.citations,
-                    'url': pub.url,
-                    'journal': pub.journal,
-                    'authors': pub.authors,
-                    'year': pub.year,
-                }
+            # Handle merged sources (e.g., "Multiple sources: Google Scholar (45 cites), Scopus (52 cites)")
+            if pub.source and 'multiple sources:' in pub.source.lower():
+                # Parse merged source string
+                source_part = pub.source.split(':', 1)[1].strip() if ':' in pub.source else pub.source
+                
+                # Extract individual sources with case-insensitive matching
+                import re
+                
+                # Match patterns like "Google Scholar (45 cites)" or "Google Scholar"
+                pattern = r'([\w\s]+?)(?:\s*\([\d\s]*cites?\))?(?:,|$)'
+                matches = re.findall(pattern, source_part, re.IGNORECASE)
+                
+                for match in matches:
+                    source_name = match.strip()
+                    source_lower = source_name.lower()
+                    
+                    # Map to enum using case-insensitive lookup
+                    mapped_source = None
+                    for key, enum_val in self.source_map.items():
+                        if key.lower() == source_lower:
+                            mapped_source = enum_val
+                            break
+                    
+                    if mapped_source:
+                        indexed_sources.add(mapped_source)
+                        if mapped_source not in source_metadata:
+                            source_metadata[mapped_source] = {
+                                'citations': pub.citations,
+                                'url': pub.url,
+                                'journal': pub.journal,
+                                'authors': pub.authors,
+                                'year': pub.year,
+                            }
+            else:
+                # Handle single source - use case-insensitive matching
+                pub_source = pub.source.strip() if pub.source else ""
+                mapped_source = None
+                
+                # Try exact match first, then case-insensitive
+                if pub_source in self.source_map:
+                    mapped_source = self.source_map[pub_source]
+                else:
+                    pub_source_lower = pub_source.lower()
+                    for key, enum_val in self.source_map.items():
+                        if key.lower() == pub_source_lower:
+                            mapped_source = enum_val
+                            break
+                
+                if mapped_source:
+                    indexed_sources.add(mapped_source)
+                    source_metadata[mapped_source] = {
+                        'citations': pub.citations,
+                        'url': pub.url,
+                        'journal': pub.journal,
+                        'authors': pub.authors,
+                        'year': pub.year,
+                    }
+        
+        # Convert available_sources (which might be strings) to enums
+        available_source_enums = set()
+        if self.available_sources:
+            for src in self.available_sources:
+                if isinstance(src, IndexingSource):
+                    available_source_enums.add(src)
+                elif isinstance(src, str):
+                    # Map string to enum using case-insensitive lookup
+                    src_lower = src.lower()
+                    for key, enum_val in self.source_map.items():
+                        if key.lower() == src_lower:
+                            available_source_enums.add(enum_val)
+                            break
+        else:
+            available_source_enums = set(IndexingSource)
         
         # Determine missing sources
-        available_source_enums = {self.source_map[src.value] for src in self.available_sources 
-                                 if src.value in self.source_map}
         missing_sources = available_source_enums - indexed_sources
         
         # Calculate coverage score
@@ -459,11 +542,23 @@ def analyze_publication_coverage(publications: List[Publication],
     Dict
         Comprehensive coverage analysis report.
     """
-    # Convert source names to enums
+    # Create a temporary analyzer to get the improved source mapping
+    temp_analyzer = CoverageAnalyzer()
+    
+    # Convert source names to enums using improved mapping
     source_enums = []
     if available_sources:
-        source_map = {source.value: source for source in IndexingSource}
-        source_enums = [source_map[name] for name in available_sources if name in source_map]
+        for source_name in available_sources:
+            # Try case-insensitive lookup
+            mapped_source = None
+            source_name_lower = source_name.lower()
+            for key, enum_val in temp_analyzer.source_map.items():
+                if key.lower() == source_name_lower:
+                    mapped_source = enum_val
+                    break
+            
+            if mapped_source and mapped_source not in source_enums:
+                source_enums.append(mapped_source)
     
     # Analyze coverage
     analyzer = CoverageAnalyzer(source_enums if source_enums else None)

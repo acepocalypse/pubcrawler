@@ -134,7 +134,7 @@ def api_search():
             author=author,
             api_keys=clean_api_keys,
             max_pubs_g_scholar=1000,
-            headless_g_scholar=False,  # Always headless for web interface
+            headless_g_scholar=True, 
             analyze_coverage=False  # We'll do this separately
         )
         

@@ -212,7 +212,7 @@ class OptimizedStealthDriver:
         self.behavior_sim = AdaptiveHumanBehaviorSimulator()
         self.ua = UserAgent()
 
-    def create_driver(self, headless: bool = False) -> uc.Chrome:
+    def create_driver(self, headless: bool = True) -> uc.Chrome:
         """Create optimized undetected Chrome driver"""
         options = uc.ChromeOptions()
 
@@ -240,19 +240,22 @@ class OptimizedStealthDriver:
 
         if headless:
             options.add_argument('--headless=new')
+            options.add_argument('--no-first-run')
+            options.add_argument('--disable-default-apps')
 
         try:
-            driver = uc.Chrome(options=options, version_main=None)
+            # For undetected_chromedriver, we need to pass headless explicitly
+            driver = uc.Chrome(options=options, headless=headless, version_main=None)
             self._inject_stealth_js(driver)
             driver.set_page_load_timeout(20)
             driver.implicitly_wait(3)
-            logger.info("Successfully created optimized Chrome driver")
+            logger.info(f"Successfully created optimized Chrome driver (headless={headless})")
             return driver
         except Exception as e:
             logger.error(f"Failed to create undetected-chromedriver: {e}")
             return self._create_fallback_driver(headless)
 
-    def _create_fallback_driver(self, headless: bool = False):
+    def _create_fallback_driver(self, headless: bool = True):
         """Create fallback driver using regular Selenium"""
         logger.info("Creating fallback driver with regular Selenium...")
         options = Options()
@@ -265,11 +268,14 @@ class OptimizedStealthDriver:
 
         if headless:
             options.add_argument('--headless=new')
+            options.add_argument('--no-first-run')
+            options.add_argument('--disable-default-apps')
 
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         self._inject_stealth_js(driver)
         driver.set_page_load_timeout(20)
         driver.implicitly_wait(3)
+        logger.info(f"Created fallback driver (headless={headless})")
         return driver
             
     def _inject_stealth_js(self, driver):
@@ -304,7 +310,7 @@ class OptimizedScholarScraper:
         self.captcha_handler = None
         self._cleanup_called = False
         
-    def initialize_driver(self, headless: bool = False):
+    def initialize_driver(self, headless: bool = True):
         """Initialize driver"""
         self.driver = self.stealth_driver.create_driver(headless)
         self.captcha_handler = OptimizedCaptchaHandler(self.driver, self.behavior_sim)
