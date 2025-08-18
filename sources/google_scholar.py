@@ -79,7 +79,7 @@ class ScrapingConfig:
     """Configuration class for pipeline integration"""
     
     def __init__(self, **kwargs):
-        self.headless = kwargs.get('headless', False)
+        self.headless = kwargs.get('headless', True)
         self.turbo_mode = kwargs.get('turbo_mode', True)
         self.max_publications_detail = kwargs.get('max_publications_detail', 500)
         
@@ -688,7 +688,7 @@ def fetch(
     *,
     orcid_id: str = None,
     max_publications_detail: int = 100,
-    headless: bool = False,
+    headless: bool = True,
     turbo_mode: bool = True,
 ) -> List[Publication]:
     """
@@ -704,7 +704,7 @@ def fetch(
         ORCID ID for additional search capabilities.
     max_publications_detail : int, default 100
         Maximum number of detailed records to fetch.
-    headless : bool, default False
+    headless : bool, default True
         Whether to run browser in headless mode.
     turbo_mode : bool, default True
         Enable speed optimizations.
@@ -884,7 +884,7 @@ if __name__ == "__main__":
             first_name='Morgan',
             last_name='Furze',
             max_publications_detail=500,
-            headless=False,
+            headless=True,  # Now uses headless by default
             turbo_mode=True
         )
         

@@ -257,8 +257,8 @@ def fetch(
         raw_df = _query_scopus_by_id(scopus_id, api_key, page_batch)
     elif orcid_id and api_key:
         raw_df = _query_scopus_by_orcid(orcid_id, api_key, page_batch)
-    elif first_name and last_name and api_key:
-        raw_df = _query_scopus_by_name(first_name, last_name, affiliation, api_key, page_batch)
+    # elif first_name and last_name and api_key:
+    #     raw_df = _query_scopus_by_name(first_name, last_name, affiliation, api_key, page_batch)
     else:
         print("Error: Insufficient parameters for Scopus search")
         return []
