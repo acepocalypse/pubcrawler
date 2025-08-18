@@ -17,9 +17,11 @@ from __future__ import annotations
 import re
 import time
 import json
+import os
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 import requests
+from dotenv import load_dotenv
 
 # ----- pubcrawler core ------------------------------------------------------
 try:
@@ -317,8 +319,8 @@ def _orcid_to_canonical(works: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def fetch(
     orcid_id: str,
-    client_id: str,
-    client_secret: str,
+    client_id: str = None,
+    client_secret: str = None,
     *,
     max_records: int = 1000,
 ) -> List[Publication]:
@@ -330,10 +332,10 @@ def fetch(
     ----------
     orcid_id : str
         The ORCID identifier (e.g., "0000-0000-0000-0000").
-    client_id : str
-        ORCID API client ID.
-    client_secret : str
-        ORCID API client secret.
+    client_id : str, optional
+        ORCID API client ID. If not provided, will try to load from ORCID_CLIENT_ID environment variable.
+    client_secret : str, optional
+        ORCID API client secret. If not provided, will try to load from ORCID_CLIENT_SECRET environment variable.
     max_records : int, default 1000
         Maximum number of records to fetch.
 
@@ -342,6 +344,15 @@ def fetch(
     List[Publication]
         List of Publication objects.
     """
+    # Load environment variables if credentials not provided
+    if not client_id or not client_secret:
+        load_dotenv()
+        client_id = client_id or os.environ.get("ORCID_CLIENT_ID")
+        client_secret = client_secret or os.environ.get("ORCID_CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        raise ValueError("ORCID client credentials are required. Provide them as parameters or set ORCID_CLIENT_ID and ORCID_CLIENT_SECRET environment variables.")
+    
     print(f"Fetching ORCID data for ID: {orcid_id}")
     
     # Initialize ORCID client

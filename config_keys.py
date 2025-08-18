@@ -10,7 +10,9 @@ from typing import Dict, Optional
 # API Keys - Set these as environment variables for security
 DEFAULT_API_KEYS = {
     "scopus_api_key": None,  # Set SCOPUS_API_KEY environment variable
-    "wos_api_key": None      # Set WOS_API_KEY environment variable
+    "wos_api_key": None,     # Set WOS_API_KEY environment variable
+    "orcid_client_id": None, # Set ORCID_CLIENT_ID environment variable
+    "orcid_client_secret": None # Set ORCID_CLIENT_SECRET environment variable
 }
 
 def get_api_keys() -> Dict[str, Optional[str]]:
@@ -24,7 +26,9 @@ def get_api_keys() -> Dict[str, Optional[str]]:
     """
     return {
         "scopus_api_key": os.environ.get("SCOPUS_API_KEY", DEFAULT_API_KEYS["scopus_api_key"]),
-        "wos_api_key": os.environ.get("WOS_API_KEY", DEFAULT_API_KEYS["wos_api_key"])
+        "wos_api_key": os.environ.get("WOS_API_KEY", DEFAULT_API_KEYS["wos_api_key"]),
+        "orcid_client_id": os.environ.get("ORCID_CLIENT_ID", DEFAULT_API_KEYS["orcid_client_id"]),
+        "orcid_client_secret": os.environ.get("ORCID_CLIENT_SECRET", DEFAULT_API_KEYS["orcid_client_secret"])
     }
 
 # Default search settings

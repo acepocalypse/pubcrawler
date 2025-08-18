@@ -104,7 +104,7 @@
             <div class="max-w-3xl mx-auto">
                 <h2 class="text-3xl font-light text-center mb-6">Track Publication Coverage</h2>
                 <p class="text-gray-600 text-center mb-8 max-w-2xl mx-auto">
-                    Enter a researcher's name and at least one identifier and their Google Scholar ID, Scopus ID, and affiliation to see their publications across Google Scholar, Scopus and Web of Science to uncover coverage gaps.
+                    Enter a researcher's name and identifiers to analyze their publication coverage across Google Scholar, Scopus, Web of Science, and ORCID.
                 </p>
                 
                 <div class="bg-white rounded-xl shadow-light p-6">
@@ -170,17 +170,15 @@
                             </button>
                             <div id="api-keys-section" class="hidden mt-3 p-4 bg-gray-50 rounded-lg">
                                 <p class="text-sm text-gray-600 mb-3">
-                                    API keys are auto-populated from the configuration. You can override them here if needed.
-                                    Providing API keys enables access to Scopus, Web of Science, and ORCID databases for comprehensive coverage analysis.
-                                    Note: Scopus ID lookup works without an API key for public data, but an API key provides more detailed information.
+                                    API keys enable access to additional data from Scopus, Web of Science, and ORCID.
                                 </p>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Scopus API Key</label>
                                         <input 
                                             type="password" 
                                             id="scopus-api-key"
-                                            placeholder="Auto-populated (or enter your own)" 
+                                            placeholder="Enter your Scopus API key" 
                                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                         >
                                     </div>
@@ -189,7 +187,7 @@
                                         <input 
                                             type="password" 
                                             id="wos-api-key"
-                                            placeholder="Auto-populated (or enter your own)" 
+                                            placeholder="Enter your WoS API key" 
                                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                         >
                                     </div>
@@ -198,18 +196,16 @@
                                         <input 
                                             type="password" 
                                             id="orcid-client-id"
-                                            placeholder="Auto-populated (or enter your own)" 
+                                            placeholder="Enter your ORCID Client ID" 
                                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                         >
                                     </div>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-1 gap-4 mt-3">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">ORCID Client Secret</label>
                                         <input 
                                             type="password" 
                                             id="orcid-client-secret"
-                                            placeholder="Auto-populated (or enter your own)" 
+                                            placeholder="Enter your ORCID Client Secret" 
                                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                         >
                                     </div>
@@ -225,30 +221,6 @@
                             </button>
                         </div>
                     </form>
-                    
-                    <div class="mt-6 flex flex-wrap gap-3">
-                        <div class="flex items-center">
-                            <span class="text-sm font-medium mr-2">Filters:</span>
-                        </div>
-                        <select id="year-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5">
-                            <option value="All Years">All Years</option>
-                            <option value="2020-2023">2020-2023</option>
-                            <option value="2015-2019">2015-2019</option>
-                            <option value="Before 2015">Before 2015</option>
-                        </select>
-                        <select id="database-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5">
-                            <option value="All Databases">All Databases</option>
-                            <option value="All Three">All Three</option>
-                            <option value="Google Scholar Only">Google Scholar Only</option>
-                            <option value="Scopus Only">Scopus Only</option>
-                            <option value="Web of Science Only">Web of Science Only</option>
-                        </select>
-                        <select id="sort-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5">
-                            <option value="newest">Sort by: Newest First</option>
-                            <option value="oldest">Sort by: Oldest First</option>
-                            <option value="most_cited">Sort by: Most Cited</option>
-                        </select>
-                    </div>
                 </div>
             </div>
         </section>
@@ -275,11 +247,13 @@
         <!-- Results Section -->
         <section id="results-section" class="hidden">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-                <h3 class="text-xl font-light mb-4 md:mb-0">
-                    Publications for: <span class="font-medium" id="researcher-display-name">-</span>
-                    <span class="text-gray-500 text-sm font-normal ml-2" id="researcher-info"></span>
-                </h3>
-                <div class="flex space-x-3">
+                <div>
+                    <h3 class="text-xl font-light mb-2">
+                        Publications for: <span class="font-medium" id="researcher-display-name">-</span>
+                    </h3>
+                    <p class="text-gray-500 text-sm" id="researcher-info"></p>
+                </div>
+                <div class="flex space-x-3 mt-4 md:mt-0">
                     <button id="export-csv" class="text-sm px-4 py-2 border border-gray-300 rounded-lg flex items-center hover:bg-gray-50">
                         <i class="fas fa-download mr-2"></i> Export CSV
                     </button>
@@ -289,30 +263,105 @@
                 </div>
             </div>
 
+            <!-- Simplified Filters -->
+            <div class="bg-white rounded-lg p-4 mb-6 shadow-light">
+                <div class="flex flex-wrap gap-4 items-center justify-between">
+                    <div class="flex flex-wrap gap-4 items-center">
+                        <!-- Search Filter -->
+                        <div class="flex items-center">
+                            <input 
+                                type="text" 
+                                id="search-filter" 
+                                placeholder="Search titles, authors, journals..."
+                                class="text-sm border border-gray-300 rounded-lg px-3 py-2 w-64 focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                            >
+                        </div>
+                        
+                        <!-- Year Range -->
+                        <div class="flex items-center space-x-2">
+                            <label class="text-sm text-gray-600">Year:</label>
+                            <input 
+                                type="number" 
+                                id="year-min" 
+                                placeholder="From" 
+                                class="text-sm border border-gray-300 rounded-lg px-3 py-2 w-20 focus:ring-2 focus:ring-gray-800 focus:border-transparent" 
+                                min="1900" 
+                                max="2030"
+                            >
+                            <span class="text-gray-400">–</span>
+                            <input 
+                                type="number" 
+                                id="year-max" 
+                                placeholder="To" 
+                                class="text-sm border border-gray-300 rounded-lg px-3 py-2 w-20 focus:ring-2 focus:ring-gray-800 focus:border-transparent" 
+                                min="1900" 
+                                max="2030"
+                            >
+                        </div>
+                        
+                        <!-- Source Filter -->
+                        <div class="flex items-center">
+                            <label class="text-sm text-gray-600 mr-2">Source:</label>
+                            <select id="source-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-gray-800 focus:border-transparent">
+                                <option value="all">All Sources</option>
+                                <option value="all-four">All Four Sources</option>
+                                <option value="google-scholar">Google Scholar</option>
+                                <option value="scopus">Scopus</option>
+                                <option value="wos">Web of Science</option>
+                                <option value="orcid">ORCID</option>
+                                <option value="multiple">Multiple Sources</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Sort -->
+                        <div class="flex items-center">
+                            <label class="text-sm text-gray-600 mr-2">Sort:</label>
+                            <select id="sort-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-gray-800 focus:border-transparent">
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                                <option value="most-cited">Most Cited</option>
+                                <option value="title">Title A-Z</option>
+                                <option value="journal">Journal A-Z</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Clear Filters -->
+                        <button id="clear-filters" class="text-sm px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-lg transition">
+                            <i class="fas fa-times mr-1"></i> Clear
+                        </button>
+                    </div>
+                    
+                    <!-- Results Count -->
+                    <div class="text-sm text-gray-600">
+                        <span id="filtered-count" class="font-medium">0</span> of <span id="total-count" class="font-medium">0</span> publications
+                    </div>
+                </div>
+            </div>
+
             <div class="bg-white rounded-xl shadow-light overflow-hidden">
                 <!-- Legend -->
-                <div class="border-b border-gray-200 px-6 py-3 flex flex-wrap items-center text-sm">
-                    <span class="text-gray-700 mr-4">Database Legend:</span>
+                <div class="border-b border-gray-200 px-6 py-3 flex flex-wrap items-center text-sm bg-gray-50">
+                    <span class="text-gray-700 mr-4 font-medium">Coverage:</span>
                     <div class="flex items-center mr-4">
-                        <div class="w-5 h-5 bg-gray-800 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 bg-gray-800 rounded-full flex items-center justify-center mr-2">
                             <i class="fab fa-google text-white text-xs"></i>
                         </div>
                         <span>Google Scholar</span>
                     </div>
                     <div class="flex items-center mr-4">
-                        <div class="w-5 h-5 bg-red-600 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 bg-red-600 rounded-full flex items-center justify-center mr-2">
                             <i class="fas fa-database text-white text-xs"></i>
                         </div>
                         <span>Scopus</span>
                     </div>
                     <div class="flex items-center mr-4">
-                        <div class="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 bg-blue-600 rounded-full flex items-center justify-center mr-2">
                             <i class="fas fa-globe text-white text-xs"></i>
                         </div>
                         <span>Web of Science</span>
                     </div>
                     <div class="flex items-center">
-                        <div class="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 bg-green-600 rounded-full flex items-center justify-center mr-2">
                             <i class="fab fa-orcid text-white text-xs"></i>
                         </div>
                         <span>ORCID</span>
@@ -416,6 +465,8 @@
     <script>
         // Global variables
         let currentSearchResults = null;
+        let originalPublications = [];
+        let filteredPublications = [];
 
         // DOM elements
         const searchForm = document.getElementById('search-form');
@@ -441,22 +492,37 @@
             // API keys toggle
             apiKeysToggle.addEventListener('click', toggleApiKeysSection);
 
-            // Filter changes
-            document.getElementById('year-filter').addEventListener('change', applyFilters);
-            document.getElementById('database-filter').addEventListener('change', applyFilters);
+            // Live filter event listeners  
+            document.getElementById('search-filter').addEventListener('input', applyFilters);
+            document.getElementById('year-min').addEventListener('input', applyFilters);
+            document.getElementById('year-max').addEventListener('input', applyFilters);
+            document.getElementById('source-filter').addEventListener('change', applyFilters);
             document.getElementById('sort-filter').addEventListener('change', applyFilters);
+            document.getElementById('clear-filters').addEventListener('click', clearFilters);
 
             // Export button
-            document.getElementById('export-csv').addEventListener('click', exportToCSV);
+            const exportBtn = document.getElementById('export-csv');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', exportToCSV);
+            }
 
             // Print button
-            document.getElementById('print-btn').addEventListener('click', () => window.print());
+            const printBtn = document.getElementById('print-btn');
+            if (printBtn) {
+                printBtn.addEventListener('click', () => window.print());
+            }
 
             // Recent searches
-            document.getElementById('recent-searches').addEventListener('click', showRecentSearches);
+            const recentSearchesBtn = document.getElementById('recent-searches');
+            if (recentSearchesBtn) {
+                recentSearchesBtn.addEventListener('click', showRecentSearches);
+            }
 
             // Settings
-            document.getElementById('settings-btn').addEventListener('click', showSettings);
+            const settingsBtn = document.getElementById('settings-btn');
+            if (settingsBtn) {
+                settingsBtn.addEventListener('click', showSettings);
+            }
         }
 
         function toggleApiKeysSection() {
@@ -495,11 +561,6 @@
                         wos_api_key: document.getElementById('wos-api-key').value.trim(),
                         orcid_client_id: document.getElementById('orcid-client-id').value.trim(),
                         orcid_client_secret: document.getElementById('orcid-client-secret').value.trim()
-                    },
-                    filters: {
-                        year_range: document.getElementById('year-filter').value,
-                        database: document.getElementById('database-filter').value,
-                        sort_by: document.getElementById('sort-filter').value
                     }
                 };
 
@@ -510,11 +571,6 @@
                     },
                     body: JSON.stringify(searchData)
                 });
-
-                if (!response.ok) {
-                    const result = await response.json();
-                    throw new Error(result.error || 'Search failed');
-                }
 
                 const result = await response.json();
 
@@ -617,10 +673,20 @@
             const tableBody = document.getElementById('publications-table-body');
             tableBody.innerHTML = '';
 
+            // Store original publications for filtering
+            originalPublications = [...data.publications];
+            filteredPublications = [...data.publications];
+
+            // Initialize year range based on actual data
+            initializeYearRange();
+            
             data.publications.forEach(pub => {
                 const row = createPublicationRow(pub);
                 tableBody.appendChild(row);
             });
+
+            // Initialize filter counts
+            updateFilterCounts(data.publications.length, data.publications.length);
 
             // Show results
             resultsSection.classList.remove('hidden');
@@ -637,10 +703,9 @@
 
             // Coverage icons with coverage score
             const coverageCount = (pub.coverage.google_scholar ? 1 : 0) + 
-                                (pub.coverage.scopus ? 1 : 0) + 
-                                (pub.coverage.wos ? 1 : 0) +
-                                (pub.coverage.orcid ? 1 : 0);
-            const coveragePercentage = Math.round((coverageCount / 4) * 100);
+                                  (pub.coverage.scopus ? 1 : 0) + 
+                                  (pub.coverage.wos ? 1 : 0) +
+                                  (pub.coverage.orcid ? 1 : 0);
             
             const coverageHtml = `
                 <div class="flex flex-col items-center space-y-2">
@@ -750,12 +815,152 @@
             return row;
         }
 
-        function applyFilters() {
-            if (!currentSearchResults) return;
+        function initializeYearRange() {
+            if (originalPublications.length > 0) {
+                // Get actual year range from publications
+                const years = originalPublications
+                    .map(pub => pub.year)
+                    .filter(year => year && year > 0)
+                    .sort((a, b) => a - b);
+                
+                if (years.length > 0) {
+                    const minYear = years[0];
+                    const maxYear = years[years.length - 1];
+                    
+                    // Update year inputs with actual range
+                    document.getElementById('year-min').value = minYear;
+                    document.getElementById('year-max').value = maxYear;
+                    document.getElementById('year-min').placeholder = minYear;
+                    document.getElementById('year-max').placeholder = maxYear;
+                }
+            }
+        }
 
-            // Re-trigger search with new filters (simplified for demo)
-            // In a full implementation, you might want to filter client-side for better UX
-            console.log('Filters changed - would re-search with new filters');
+        function clearFilters() {
+            const searchElement = document.getElementById('search-filter');
+            const sourceElement = document.getElementById('source-filter');
+            const sortElement = document.getElementById('sort-filter');
+            const yearMinElement = document.getElementById('year-min');
+            const yearMaxElement = document.getElementById('year-max');
+            
+            if (searchElement) searchElement.value = '';
+            if (sourceElement) sourceElement.value = 'all';
+            if (sortElement) sortElement.value = 'newest';
+            if (yearMinElement) yearMinElement.value = '';
+            if (yearMaxElement) yearMaxElement.value = '';
+            
+            applyFilters();
+        }
+
+        function applyFilters() {
+            if (!currentSearchResults || !originalPublications.length) return;
+
+            let filtered = [...originalPublications];
+
+            // Search filter (title, authors, journal)
+            const searchElement = document.getElementById('search-filter');
+            if (searchElement) {
+                const searchTerm = searchElement.value.toLowerCase().trim();
+                if (searchTerm) {
+                    filtered = filtered.filter(pub => {
+                        const title = (pub.title || '').toLowerCase();
+                        const authors = (pub.authors || []).join(' ').toLowerCase();
+                        const journal = (pub.journal || '').toLowerCase();
+                        return title.includes(searchTerm) || authors.includes(searchTerm) || journal.includes(searchTerm);
+                    });
+                }
+            }
+
+            // Year filter
+            const yearMinElement = document.getElementById('year-min');
+            const yearMaxElement = document.getElementById('year-max');
+            if (yearMinElement && yearMaxElement) {
+                const yearMin = parseInt(yearMinElement.value);
+                const yearMax = parseInt(yearMaxElement.value);
+                
+                if (yearMin && !isNaN(yearMin)) {
+                    filtered = filtered.filter(pub => (pub.year || 0) >= yearMin);
+                }
+                if (yearMax && !isNaN(yearMax)) {
+                    filtered = filtered.filter(pub => (pub.year || 0) <= yearMax);
+                }
+            }
+
+            // Source filter
+            const sourceElement = document.getElementById('source-filter');
+            if (sourceElement) {
+                const sourceFilter = sourceElement.value;
+                if (sourceFilter !== 'all') {
+                    if (sourceFilter === 'all-four') {
+                        filtered = filtered.filter(pub => {
+                            const coverage = pub.coverage || {};
+                            return coverage.google_scholar && coverage.scopus && coverage.wos && coverage.orcid;
+                        });
+                    } else if (sourceFilter === 'multiple') {
+                        filtered = filtered.filter(pub => (pub.coverage_count || 0) > 1);
+                    } else {
+                        const sourceMap = {
+                            'google-scholar': 'google_scholar',
+                            'scopus': 'scopus', 
+                            'wos': 'wos',
+                            'orcid': 'orcid'
+                        };
+                        const sourceName = sourceMap[sourceFilter];
+                        if (sourceName) {
+                            filtered = filtered.filter(pub => {
+                                const coverage = pub.coverage || {};
+                                return coverage[sourceName] === true;
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Sort
+            const sortElement = document.getElementById('sort-filter');
+            if (sortElement) {
+                const sortFilter = sortElement.value;
+                filtered.sort((a, b) => {
+                    switch (sortFilter) {
+                        case 'newest':
+                            return (b.year || 0) - (a.year || 0);
+                        case 'oldest':
+                            return (a.year || 0) - (b.year || 0);
+                        case 'most-cited':
+                            return (b.citations || 0) - (a.citations || 0);
+                        case 'title':
+                            return (a.title || '').localeCompare(b.title || '');
+                        case 'journal':
+                            return (a.journal || '').localeCompare(b.journal || '');
+                        default:
+                            return 0;
+                    }
+                });
+            }
+
+            filteredPublications = filtered;
+            updateResultsDisplay(filtered);
+            updateFilterCounts(filtered.length, originalPublications.length);
+        }
+
+        function updateFilterCounts(filteredCount, totalCount) {
+            const filteredElement = document.getElementById('filtered-count');
+            const totalElement = document.getElementById('total-count');
+            const totalPubsElement = document.getElementById('total-publications');
+            
+            if (filteredElement) filteredElement.textContent = filteredCount;
+            if (totalElement) totalElement.textContent = totalCount;
+            if (totalPubsElement) totalPubsElement.textContent = filteredCount;
+        }
+
+        function updateResultsDisplay(publications) {
+            const tableBody = document.getElementById('publications-table-body');
+            tableBody.innerHTML = '';
+
+            publications.forEach(pub => {
+                const row = createPublicationRow(pub);
+                tableBody.appendChild(row);
+            });
         }
 
         function hideResults() {
@@ -772,7 +977,8 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        publications: currentSearchResults.publications,
+                        publications: filteredPublications.length > 0 ? filteredPublications : currentSearchResults.publications,
+                        researcher: currentSearchResults.researcher,
                         format: 'csv'
                     })
                 });
@@ -787,7 +993,18 @@
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = url;
-                a.download = `publications_${new Date().toISOString().slice(0,10)}.csv`;
+                
+                // Get filename from response headers or generate default
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = `publications_${new Date().toISOString().slice(0,10)}.csv`;
+                if (contentDisposition) {
+                    const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(contentDisposition);
+                    if (matches != null && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+                
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);

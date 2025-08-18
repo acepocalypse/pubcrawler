@@ -426,7 +426,6 @@ def fetch(
     api_key: str,
     *,
     author_ids: Optional[List[str]] = None,
-    orcid_ids: Optional[List[str]] = None,
     max_records: int = 100,
 ) -> List[Publication]:
     """
@@ -441,24 +440,11 @@ def fetch(
         Your Web of Science API key.
     author_ids : List[str], optional
         WoS Author IDs to search by. If provided, these take precedence over name search.
-    orcid_ids : List[str], optional
-        ORCID IDs to search by in Web of Science.
     max_records : int, default 100
         Maximum number of records to fetch.
     """
     
     all_dfs = []
-    
-    # Try ORCID search if provided
-    if orcid_ids:
-        for orcid_id in orcid_ids:
-            try:
-                df = _wos_pipeline_orcid(orcid_id, api_key, max_records)
-                if not df.empty:
-                    df["search_orcid_id"] = orcid_id
-                    all_dfs.append(df)
-            except Exception as e:
-                print(f"⚠️ Failed to fetch for ORCID ID={orcid_id}: {e}")
     
     # Try author ID search first if provided
     if author_ids:

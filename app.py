@@ -102,7 +102,6 @@ def api_search():
         orcid_id = data.get('orcid_id', '').strip()
         affiliation = data.get('affiliation', '').strip()
         api_keys = data.get('api_keys', {})
-        filters = data.get('filters', {})
         
         # Create author object
         author = Author(
@@ -171,16 +170,13 @@ def api_search():
         # Perform coverage analysis
         coverage_report = analyze_publication_coverage(publications, available_sources)
         
-        # Apply filters
-        filtered_publications = _apply_filters(publications, filters)
-        
         # Debug information (only in development)
         debug_info = {}
         if app.debug:
             debug_info = debug_publication_matching(publications, verbose=False)
             print(f"📊 Debug info: {debug_info['unique_publications']}/{debug_info['total_publications']} unique publications found")
         
-        # Format response
+        # Format response (no server-side filtering - done on client)
         response_data = {
             'success': True,
             'researcher': {
@@ -188,19 +184,18 @@ def api_search():
                 'affiliation': affiliation,
                 'gs_id': google_scholar_id,
                 'scopus_id': scopus_id,
-                'orcid_id': orcid_id,
+                'orcid_id': orcid_id,  # Keep as orcid_id for frontend consistency
                 'search_timestamp': datetime.now().isoformat()
             },
             'summary': {
-                'total_publications': len(filtered_publications),
+                'total_publications': len(publications),
                 'total_before_filters': len(publications),
-                'unique_publications': debug_info.get('unique_publications', len(filtered_publications)),
+                'unique_publications': debug_info.get('unique_publications', len(publications)),
                 'sources_used': available_sources,
                 'coverage_report': coverage_report.get('summary', {})
             },
-            'publications': [_format_publication(pub, publications) for pub in filtered_publications],
-            'coverage_analysis': coverage_report,
-            'filters_applied': filters
+            'publications': [_format_publication(pub, publications) for pub in publications],
+            'coverage_analysis': coverage_report
         }
         
         # Clean the response data to ensure JSON serialization
@@ -326,10 +321,11 @@ def api_export():
     try:
         data = request.get_json()
         publications_data = data.get('publications', [])
+        researcher_info = data.get('researcher', {})
         export_format = data.get('format', 'csv')
         
         if export_format == 'csv':
-            return _export_to_csv(publications_data)
+            return _export_to_csv(publications_data, researcher_info)
         else:
             return jsonify({'error': 'Unsupported export format'}), 400
             
@@ -355,42 +351,6 @@ def _clean_response_for_json(data):
         return None
     else:
         return data
-
-
-def _apply_filters(publications: List[Publication], filters: Dict) -> List[Publication]:
-    """Apply user-specified filters to publications."""
-    filtered_pubs = publications.copy()
-    
-    # Year range filter
-    year_range = filters.get('year_range')
-    if year_range and year_range != 'All Years':
-        if year_range == '2020-2023':
-            filtered_pubs = [p for p in filtered_pubs if p.year and 2020 <= p.year <= 2023]
-        elif year_range == '2015-2019':
-            filtered_pubs = [p for p in filtered_pubs if p.year and 2015 <= p.year <= 2019]
-        elif year_range == 'Before 2015':
-            filtered_pubs = [p for p in filtered_pubs if p.year and p.year < 2015]
-    
-    # Database filter
-    database_filter = filters.get('database')
-    if database_filter and database_filter != 'All Databases':
-        if database_filter == 'Google Scholar Only':
-            filtered_pubs = [p for p in filtered_pubs if 'google scholar' in p.source.lower()]
-        elif database_filter == 'Scopus Only':
-            filtered_pubs = [p for p in filtered_pubs if 'scopus' in p.source.lower()]
-        elif database_filter == 'Web of Science Only':
-            filtered_pubs = [p for p in filtered_pubs if 'web of science' in p.source.lower() or 'wos' in p.source.lower()]
-    
-    # Sort
-    sort_by = filters.get('sort_by', 'newest')
-    if sort_by == 'newest':
-        filtered_pubs.sort(key=lambda p: p.year or 0, reverse=True)
-    elif sort_by == 'oldest':
-        filtered_pubs.sort(key=lambda p: p.year or 0)
-    elif sort_by == 'most_cited':
-        filtered_pubs.sort(key=lambda p: p.citations or 0, reverse=True)
-    
-    return filtered_pubs
 
 
 def _format_publication(pub: Publication, all_publications: List[Publication] = None) -> Dict:
@@ -564,19 +524,20 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
     return formatted_pub
 
 
-def _export_to_csv(publications_data: List[Dict]) -> str:
+def _export_to_csv(publications_data: List[Dict], researcher_info: Dict = None) -> str:
     """Export publications to CSV format."""
     import io
     import csv
+    import re
     from flask import make_response
     
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Header with detailed citation information
+    # Header with detailed citation information and ORCID
     writer.writerow([
         'Title', 'Authors', 'Journal', 'Year', 'DOI', 'Max Citations', 
-        'Source', 'Google Scholar', 'Scopus', 'Web of Science',
+        'Source', 'Google Scholar', 'Scopus', 'Web of Science', 'ORCID',
         'GS Citations', 'Scopus Citations', 'WoS Citations', 'Coverage Count'
     ])
     
@@ -596,6 +557,7 @@ def _export_to_csv(publications_data: List[Dict]) -> str:
             'Yes' if coverage.get('google_scholar') else 'No',
             'Yes' if coverage.get('scopus') else 'No',
             'Yes' if coverage.get('wos') else 'No',
+            'Yes' if coverage.get('orcid') else 'No',
             source_citations.get('google_scholar', '') if source_citations.get('google_scholar') is not None else '',
             source_citations.get('scopus', '') if source_citations.get('scopus') is not None else '',
             source_citations.get('wos', '') if source_citations.get('wos') is not None else '',
@@ -604,8 +566,20 @@ def _export_to_csv(publications_data: List[Dict]) -> str:
     
     output.seek(0)
     
+    # Generate filename with researcher name
+    if researcher_info:
+        researcher_name = researcher_info.get('name', 'Unknown_Researcher')
+        # Clean the name for filename (remove special characters)
+        clean_name = re.sub(r'[^\w\s-]', '', researcher_name).strip()
+        clean_name = re.sub(r'[-\s]+', '_', clean_name)
+        orcid_id = researcher_info.get('orcid_id', '')
+        orcid_suffix = f"_{orcid_id}" if orcid_id else ""
+        filename = f"publications_{clean_name}{orcid_suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    else:
+        filename = f"publications_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
     response = make_response(output.getvalue())
-    response.headers["Content-Disposition"] = f"attachment; filename=publications_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     response.headers["Content-type"] = "text/csv"
     
     return response

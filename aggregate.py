@@ -528,7 +528,7 @@ def aggregate_publications(
     api_keys: Dict[str, str],
     *,
     max_pubs_g_scholar: int = 100,
-    headless_g_scholar: bool = False,
+    headless_g_scholar: bool = True,
     analyze_coverage: bool = True,
 ) -> List[Publication]:
     """
@@ -543,7 +543,7 @@ def aggregate_publications(
         {'scopus_api_key': '...', 'wos_api_key': '...', 'orcid_client_id': '...', 'orcid_client_secret': '...'}.
     max_pubs_g_scholar : int, default 100
         Max publications to fetch from Google Scholar.
-    headless_g_scholar : bool, default False
+    headless_g_scholar : bool, default True
         Whether to run the Google Scholar scraper in headless mode.
     analyze_coverage : bool, default True
         Whether to perform index coverage analysis.
@@ -636,15 +636,13 @@ def aggregate_publications(
             available_sources.append("Scopus")
 
         # --- Submit Web of Science task ---
-        if api_keys.get("wos_api_key") and (author.affiliation or getattr(author, 'orcid_id', None)) and wos_mod is not None:
-            orcid_ids = [author.orcid_id] if getattr(author, 'orcid_id', None) else None
+        if api_keys.get("wos_api_key") and author.affiliation and wos_mod is not None:
             future_wos = executor.submit(
                 wos_mod.fetch,
                 first_name=author.first_name,
                 last_name=author.last_name,
                 affiliation=author.affiliation or "",
                 api_key=api_keys["wos_api_key"],
-                orcid_ids=orcid_ids,
             )
             future_to_source[future_wos] = "Web of Science"
             available_sources.append("Web of Science")

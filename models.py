@@ -103,6 +103,8 @@ class Author:
         Scopus Author ID.
     wos_id : Optional[str]
         Web of Science ResearcherID.
+    orcid_id : Optional[str]
+        ORCID ID.
     """
     first_name: str
     last_name: str
@@ -110,6 +112,7 @@ class Author:
     gs_id: Optional[str] = None      # Google Scholar ID
     scopus_id: Optional[str] = None  # Scopus Author ID
     wos_id: Optional[str] = None     # Web of Science ResearcherID
+    orcid_id: Optional[str] = None   # ORCID ID
     
     @property
     def full_name(self) -> str:
