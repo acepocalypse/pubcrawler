@@ -500,6 +500,17 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
                         coverage['orcid'] = True
                         source_citations['orcid'] = match_citations
     
+    # Ensure all sources have a citation count (0 if not available)
+    standardized_citations = {
+        'google_scholar': source_citations.get('google_scholar', 0 if coverage['google_scholar'] else None),
+        'scopus': source_citations.get('scopus', 0 if coverage['scopus'] else None),
+        'wos': source_citations.get('wos', 0 if coverage['wos'] else None),
+        'orcid': source_citations.get('orcid', 0 if coverage['orcid'] else None)
+    }
+    
+    # Calculate maximum citations from all available sources
+    max_citations = max([count for count in standardized_citations.values() if count is not None], default=0)
+    
     # Clean and format all values for JSON
     formatted_pub = {
         'title': clean_value(pub.title) or "",
@@ -507,19 +518,16 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         'journal': clean_value(pub.journal),
         'year': clean_value(pub.year),
         'doi': clean_value(pub.doi),
-        'citations': int(clean_value(pub.citations)) if clean_value(pub.citations) is not None else 0,
+        'citations': max_citations,  # Use the highest citation count as the main citation metric
         'source': clean_value(pub.source) or "Unknown",
         'url': clean_value(pub.url),
-        'coverage': coverage
+        'coverage': coverage,
+        'source_citations': standardized_citations  # Always provide standardized citation data
     }
     
-    # Add detailed citation information if available
-    if source_citations:
-        formatted_pub['source_citations'] = source_citations
-        
-        # Calculate total unique coverage
-        total_coverage = sum(1 for covered in coverage.values() if covered)
-        formatted_pub['coverage_count'] = total_coverage
+    # Calculate total unique coverage
+    total_coverage = sum(1 for covered in coverage.values() if covered)
+    formatted_pub['coverage_count'] = total_coverage
     
     return formatted_pub
 

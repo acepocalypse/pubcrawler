@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PubCrawler - Publication Coverage Tracker</title>
+    <title>PubCrawler</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
@@ -377,7 +377,7 @@
                                 <th class="py-3 px-6 font-medium text-gray-700">Year</th>
                                 <th class="py-3 px-6 font-medium text-gray-700">Journal</th>
                                 <th class="py-3 px-6 font-medium text-gray-700">DOI</th>
-                                <th class="py-3 px-6 font-medium text-gray-700 text-center">Citations by Source</th>
+                                <th class="py-3 px-6 font-medium text-gray-700 text-center">Citations by Database</th>
                                 <th class="py-3 px-6 font-medium text-gray-700 text-center">Coverage</th>
                             </tr>
                         </thead>
@@ -738,73 +738,39 @@
                 `<a href="https://doi.org/${pub.doi}" target="_blank" class="text-blue-600 hover:underline text-sm">${pub.doi}</a>` : 
                 '<span class="text-gray-400 text-sm">No DOI</span>';
 
-            // Citation formatting - use source_citations if available for detailed breakdown
+            // Citations by Source - Always show a consistent 2x2 grid format
             let citationHtml = '';
-            if (pub.source_citations && Object.keys(pub.source_citations).length > 1) {
-                // Multiple sources with sleek, compact design
-                const sources = Object.entries(pub.source_citations).map(([source, count]) => {
-                    let badgeColor = 'bg-gray-500';
-                    let sourceName = source;
-                    
-                    if (source === 'google_scholar') {
-                        badgeColor = 'background-color: #4286f5';
-                        sourceName = 'GS';
-                    } else if (source === 'scopus') {
-                        badgeColor = 'background-color: #eb6601';
-                        sourceName = 'Scopus';
-                    } else if (source === 'wos') {
-                        badgeColor = 'background-color: #5e33c0';
-                        sourceName = 'WoS';
-                    } else if (source === 'orcid') {
-                        badgeColor = 'background-color: #a5cd3b';
-                        sourceName = 'ORCID';
-                    }
-                    
-                    return `<div class="inline-flex items-center text-white text-xs px-2 py-1 rounded-full mr-1 mb-1" style="${badgeColor}">
-                        <span class="font-medium">${count}</span>
-                        <span class="ml-1 opacity-80">${sourceName}</span>
-                    </div>`;
-                }).join('');
+            const sources = [
+                { key: 'google_scholar', name: 'GS', fullName: 'Google Scholar', color: '#4286f5' },
+                { key: 'scopus', name: 'Scopus', fullName: 'Scopus', color: '#eb6601' },
+                { key: 'wos', name: 'WoS', fullName: 'Web of Science', color: '#5e33c0' },
+                { key: 'orcid', name: 'ORCID', fullName: 'ORCID', color: '#a5cd3b' }
+            ];
+            
+            const sourceBoxes = sources.map(source => {
+                const citations = pub.source_citations && pub.source_citations[source.key];
+                const isIndexed = citations !== null && citations !== undefined;
+                const count = isIndexed ? citations : 0;
                 
-                citationHtml = `
-                    <div class="text-center">
-                        <div class="flex flex-wrap justify-center">
-                            ${sources}
-                        </div>
+                const boxStyle = isIndexed 
+                    ? `background-color: ${source.color}; color: white; border: 2px solid ${source.color};`
+                    : `background-color: #f3f4f6; color: #9ca3af; border: 2px solid #e5e7eb;`;
+                
+                return `
+                    <div class="flex flex-col items-center justify-center px-3 py-2 rounded text-xs font-medium min-w-0" 
+                         style="${boxStyle}" 
+                         title="${source.fullName}${isIndexed ? ': ' + count + ' citations' : ': Not indexed'}">
+                        <div class="font-bold text-base leading-tight mb-1">${count}</div>
+                        <div class="text-xs leading-tight opacity-90">${source.name}</div>
                     </div>
                 `;
-            } else if (pub.source_citations && Object.keys(pub.source_citations).length === 1) {
-                // Single source with citation count
-                const [source, count] = Object.entries(pub.source_citations)[0];
-                let badgeColor = 'bg-gray-500';
-                let sourceName = source;
-                
-                if (source === 'google_scholar') {
-                    badgeColor = 'background-color: #4286f5';
-                    sourceName = 'Google Scholar';
-                } else if (source === 'scopus') {
-                    badgeColor = 'background-color: #eb6601';
-                    sourceName = 'Scopus';
-                } else if (source === 'wos') {
-                    badgeColor = 'background-color: #5e33c0';
-                    sourceName = 'Web of Science';
-                } else if (source === 'orcid') {
-                    badgeColor = 'background-color: #a5cd3b';
-                    sourceName = 'ORCID';
-                }
-                
-                citationHtml = `
-                    <div class="text-center">
-                        <div class="font-semibold text-lg">${count}</div>
-                        <div class="text-xs text-gray-500">${sourceName}</div>
-                    </div>
-                `;
-            } else if (pub.citations) {
-                // Fallback to simple citation count
-                citationHtml = `<div class="text-center"><span class="font-semibold text-lg">${pub.citations}</span></div>`;
-            } else {
-                citationHtml = '<div class="text-center"><span class="text-gray-400">0</span></div>';
-            }
+            }).join('');
+            
+            citationHtml = `
+                <div class="grid grid-cols-2 gap-2 max-w-40 mx-auto">
+                    ${sourceBoxes}
+                </div>
+            `;
 
             row.innerHTML = `
                 <td data-label="Title & Authors" class="py-4 px-6">
@@ -814,7 +780,7 @@
                 <td data-label="Year" class="py-4 px-6">${pub.year || 'N/A'}</td>
                 <td data-label="Journal" class="py-4 px-6">${pub.journal || 'Unknown'}</td>
                 <td data-label="DOI" class="py-4 px-6">${doiHtml}</td>
-                <td data-label="Citations by Source" class="py-4 px-6">${citationHtml}</td>
+                <td data-label="Citations by Database" class="py-4 px-6">${citationHtml}</td>
                 <td data-label="Coverage" class="py-4 px-6">${coverageHtml}</td>
             `;
 
