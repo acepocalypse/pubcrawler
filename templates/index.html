@@ -343,25 +343,25 @@
                 <div class="border-b border-gray-200 px-6 py-3 flex flex-wrap items-center text-sm bg-gray-50">
                     <span class="text-gray-700 mr-4 font-medium">Coverage:</span>
                     <div class="flex items-center mr-4">
-                        <div class="w-4 h-4 bg-gray-800 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 rounded-full flex items-center justify-center mr-2" style="background-color: #4286f5;">
                             <i class="fab fa-google text-white text-xs"></i>
                         </div>
                         <span>Google Scholar</span>
                     </div>
                     <div class="flex items-center mr-4">
-                        <div class="w-4 h-4 bg-red-600 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 rounded-full flex items-center justify-center mr-2" style="background-color: #eb6601;">
                             <i class="fas fa-database text-white text-xs"></i>
                         </div>
                         <span>Scopus</span>
                     </div>
                     <div class="flex items-center mr-4">
-                        <div class="w-4 h-4 bg-blue-600 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 rounded-full flex items-center justify-center mr-2" style="background-color: #5e33c0;">
                             <i class="fas fa-globe text-white text-xs"></i>
                         </div>
                         <span>Web of Science</span>
                     </div>
                     <div class="flex items-center">
-                        <div class="w-4 h-4 bg-green-600 rounded-full flex items-center justify-center mr-2">
+                        <div class="w-4 h-4 rounded-full flex items-center justify-center mr-2" style="background-color: #a5cd3b;">
                             <i class="fab fa-orcid text-white text-xs"></i>
                         </div>
                         <span>ORCID</span>
@@ -710,16 +710,16 @@
             const coverageHtml = `
                 <div class="flex flex-col items-center space-y-2">
                     <div class="flex justify-center space-x-2">
-                        <div class="database-icon ${pub.coverage.google_scholar ? 'active' : ''} w-6 h-6 ${pub.coverage.google_scholar ? 'bg-gray-800' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="Google Scholar">
+                        <div class="database-icon ${pub.coverage.google_scholar ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.google_scholar ? '#4286f5' : '#e5e7eb'}" title="Google Scholar">
                             <i class="fab fa-google ${pub.coverage.google_scholar ? 'text-white' : 'text-gray-400'} text-xs"></i>
                         </div>
-                        <div class="database-icon ${pub.coverage.scopus ? 'active' : ''} w-6 h-6 ${pub.coverage.scopus ? 'bg-red-600' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="Scopus">
+                        <div class="database-icon ${pub.coverage.scopus ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.scopus ? '#eb6601' : '#e5e7eb'}" title="Scopus">
                             <i class="fas fa-database ${pub.coverage.scopus ? 'text-white' : 'text-gray-400'} text-xs"></i>
                         </div>
-                        <div class="database-icon ${pub.coverage.wos ? 'active' : ''} w-6 h-6 ${pub.coverage.wos ? 'bg-blue-600' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="Web of Science">
+                        <div class="database-icon ${pub.coverage.wos ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.wos ? '#5e33c0' : '#e5e7eb'}" title="Web of Science">
                             <i class="fas fa-globe ${pub.coverage.wos ? 'text-white' : 'text-gray-400'} text-xs"></i>
                         </div>
-                        <div class="database-icon ${pub.coverage.orcid ? 'active' : ''} w-6 h-6 ${pub.coverage.orcid ? 'bg-green-600' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="ORCID">
+                        <div class="database-icon ${pub.coverage.orcid ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.orcid ? '#a5cd3b' : '#e5e7eb'}" title="ORCID">
                             <i class="fab fa-orcid ${pub.coverage.orcid ? 'text-white' : 'text-gray-400'} text-xs"></i>
                         </div>
                     </div>
@@ -741,20 +741,20 @@
                     let sourceName = source;
                     
                     if (source === 'google_scholar') {
-                        badgeColor = 'bg-gray-700';
+                        badgeColor = 'background-color: #4286f5';
                         sourceName = 'GS';
                     } else if (source === 'scopus') {
-                        badgeColor = 'bg-red-500';
+                        badgeColor = 'background-color: #eb6601';
                         sourceName = 'Scopus';
                     } else if (source === 'wos') {
-                        badgeColor = 'bg-blue-500';
+                        badgeColor = 'background-color: #5e33c0';
                         sourceName = 'WoS';
                     } else if (source === 'orcid') {
-                        badgeColor = 'bg-green-500';
+                        badgeColor = 'background-color: #a5cd3b';
                         sourceName = 'ORCID';
                     }
                     
-                    return `<div class="inline-flex items-center ${badgeColor} text-white text-xs px-2 py-1 rounded-full mr-1 mb-1">
+                    return `<div class="inline-flex items-center text-white text-xs px-2 py-1 rounded-full mr-1 mb-1" style="${badgeColor}">
                         <span class="font-medium">${count}</span>
                         <span class="ml-1 opacity-80">${sourceName}</span>
                     </div>`;
@@ -774,16 +774,16 @@
                 let sourceName = source;
                 
                 if (source === 'google_scholar') {
-                    badgeColor = 'bg-gray-700';
+                    badgeColor = 'background-color: #4286f5';
                     sourceName = 'Google Scholar';
                 } else if (source === 'scopus') {
-                    badgeColor = 'bg-red-500';
+                    badgeColor = 'background-color: #eb6601';
                     sourceName = 'Scopus';
                 } else if (source === 'wos') {
-                    badgeColor = 'bg-blue-500';
+                    badgeColor = 'background-color: #5e33c0';
                     sourceName = 'Web of Science';
                 } else if (source === 'orcid') {
-                    badgeColor = 'bg-green-500';
+                    badgeColor = 'background-color: #a5cd3b';
                     sourceName = 'ORCID';
                 }
                 
