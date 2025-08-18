@@ -236,7 +236,8 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
             return True
         else:
             # Different DOIs mean definitely different publications
-            return False
+            # However, we should still check title match for possible DOI errors or inconsistencies
+            pass
     
     # Skip if from the same source (shouldn't be duplicates within same source)
     if pub1.source.lower() == pub2.source.lower():
@@ -257,9 +258,9 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
     author_match = False
     journal_match = False
     best_title_similarity = 0
-    best_journal_similarity = 0  # <-- track journal similarity even below threshold
+    best_journal_similarity = 0
     
-    # Title matching - MUCH stricter thresholds for pre-merge deduplication
+    # Title matching - key factor in matching
     if pub1.title and pub2.title:
         norm_title1 = _normalize_text_for_matching(pub1.title)
         norm_title2 = _normalize_text_for_matching(pub2.title)
@@ -270,18 +271,22 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
             partial_ratio = fuzz.partial_ratio(norm_title1, norm_title2)
             
             best_title_similarity = max(title_ratio, token_ratio, partial_ratio)
-            title_match = best_title_similarity >= 90  # Much stricter - raised from 75
+            # Allow slightly looser title match - 88% instead of 90%
+            title_match = best_title_similarity >= 88
     
-    # Year matching (allow 1 year difference for publication timing variations)
+    # Year matching (relaxed - allow for one missing year)
     if pub1.year and pub2.year:
-        year_match = abs(pub1.year - pub2.year) <= 1  # Allow ±1 year for publication timing differences
+        year_match = abs(pub1.year - pub2.year) <= 1
+    else:
+        # If one source is missing year data, don't penalize
+        year_match = True
     
-    # Author matching with much stricter algorithm
+    # Author matching
     if pub1.authors and pub2.authors:
         author_similarity = _calculate_author_similarity(pub1.authors, pub2.authors)
-        author_match = author_similarity >= 0.70  # Much stricter - raised from 0.25
+        author_match = author_similarity >= 0.50
     
-    # Journal matching with much stricter threshold
+    # Journal matching
     if pub1.journal and pub2.journal:
         norm_journal1 = _normalize_text_for_matching(pub1.journal)
         norm_journal2 = _normalize_text_for_matching(pub2.journal)
@@ -292,31 +297,39 @@ def _publications_match(pub1: Publication, pub2: Publication) -> bool:
                 fuzz.partial_ratio(norm_journal1, norm_journal2),
                 fuzz.token_set_ratio(norm_journal1, norm_journal2)
             )
-            best_journal_similarity = journal_similarity  # <-- store best journal similarity
-            journal_match = journal_similarity >= 85  # Much stricter - raised from 65
+            best_journal_similarity = journal_similarity
+            journal_match = journal_similarity >= 85
     
-    # Remove the permissive rule - it was too lenient
-    # Old rule: if best_title_similarity >= 80 and year_match and best_journal_similarity >= 50:
-    #     return True
+    # Special case for nearly-identical titles (very high confidence)
+    if best_title_similarity >= 97:
+        # If titles are almost identical, just need journal to match or author similarity
+        if journal_match or (pub1.authors and pub2.authors and author_similarity >= 0.5):
+            return True
     
-    # Enhanced confidence scoring with MUCH stricter thresholds
+    # Special case for DOI present in only one record
+    if (pub1.doi and not pub2.doi) or (pub2.doi and not pub1.doi):
+        # If one has DOI and titles match very well, it's likely the same publication
+        if best_title_similarity >= 95 and (journal_match or author_match):
+            return True
+    
+    # Enhanced confidence scoring with slightly adjusted thresholds
     confidence_score = 0
     if title_match:
-        confidence_score += 4  # Increased weight for title match
+        confidence_score += 4
     if year_match:
-        confidence_score += 3  # Increased weight for year match
+        confidence_score += 3
     if author_match:
-        confidence_score += 3  # Increased weight for author match
+        confidence_score += 3
     if journal_match:
-        confidence_score += 2  # Increased weight for journal match
+        confidence_score += 2
     
-    # MUCH stricter matching criteria - require very high confidence
+    # Adjusted matching criteria - require high but reasonable confidence
     is_match = (
-        confidence_score >= 9 or  # Require almost all criteria - raised from 4
-        (title_match and year_match and author_match and confidence_score >= 8) or  # All three core criteria
-        (title_match and year_match and journal_match and confidence_score >= 8) or  # Alternative with journal
-        # Only allow exceptional cases with near-perfect title match
-        (title_match and best_title_similarity >= 95 and year_match and (author_match or journal_match))
+        confidence_score >= 9 or
+        (title_match and year_match and author_match and confidence_score >= 7) or
+        (title_match and year_match and journal_match and confidence_score >= 7) or
+        # Allow exceptional cases with very good title match
+        (title_match and best_title_similarity >= 93 and (author_match or journal_match))
     )
     
     # Debug logging for missed matches (only in debug mode)
@@ -527,7 +540,7 @@ def aggregate_publications(
         The author to search for.
     api_keys : dict
         A dictionary containing the required API keys, e.g.,
-        {'scopus_api_key': '...', 'wos_api_key': '...'}.
+        {'scopus_api_key': '...', 'wos_api_key': '...', 'orcid_client_id': '...', 'orcid_client_secret': '...'}.
     max_pubs_g_scholar : int, default 100
         Max publications to fetch from Google Scholar.
     headless_g_scholar : bool, default False
@@ -547,6 +560,7 @@ def aggregate_publications(
     gs_mod = None
     scopus_mod = None
     wos_mod = None
+    orcid_mod = None
     try:
         try:
             from .sources import google_scholar as gs_mod  # type: ignore
@@ -568,8 +582,15 @@ def aggregate_publications(
             from sources import wos as wos_mod  # type: ignore
     except Exception as e:
         print(f"⚠️ Web of Science disabled: {e}")
+    try:
+        try:
+            from .sources import orcid as orcid_mod  # type: ignore
+        except ImportError:
+            from sources import orcid as orcid_mod  # type: ignore
+    except Exception as e:
+        print(f"⚠️ ORCID disabled: {e}")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         future_to_source: Dict[concurrent.futures.Future, str] = {}
 
         # --- Submit Google Scholar task ---
@@ -579,6 +600,7 @@ def aggregate_publications(
                 gs_id=author.gs_id,
                 first_name=author.first_name,
                 last_name=author.last_name,
+                orcid_id=getattr(author, 'orcid_id', None),
                 max_publications_detail=max_pubs_g_scholar,
                 headless=headless_g_scholar,
             )
@@ -586,7 +608,7 @@ def aggregate_publications(
             available_sources.append("Google Scholar")
 
         # --- Submit Scopus task ---
-        if api_keys.get("scopus_api_key") and (author.scopus_id or author.affiliation) and scopus_mod is not None:
+        if api_keys.get("scopus_api_key") and (author.scopus_id or getattr(author, 'orcid_id', None) or author.affiliation) and scopus_mod is not None:
             if author.scopus_id:
                 # Use Scopus ID for direct lookup
                 future_scopus = executor.submit(
@@ -594,8 +616,15 @@ def aggregate_publications(
                     scopus_id=author.scopus_id,
                     api_key=api_keys["scopus_api_key"],
                 )
+            elif getattr(author, 'orcid_id', None):
+                # Use ORCID ID for Scopus search
+                future_scopus = executor.submit(
+                    scopus_mod.fetch,
+                    orcid_id=author.orcid_id,
+                    api_key=api_keys["scopus_api_key"],
+                )
             else:
-                # Fallback to name-based search (if the old method is still available)
+                # Fallback to name-based search
                 future_scopus = executor.submit(
                     scopus_mod.fetch,
                     first_name=author.first_name,
@@ -607,16 +636,30 @@ def aggregate_publications(
             available_sources.append("Scopus")
 
         # --- Submit Web of Science task ---
-        if api_keys.get("wos_api_key") and author.affiliation and wos_mod is not None:
+        if api_keys.get("wos_api_key") and (author.affiliation or getattr(author, 'orcid_id', None)) and wos_mod is not None:
+            orcid_ids = [author.orcid_id] if getattr(author, 'orcid_id', None) else None
             future_wos = executor.submit(
                 wos_mod.fetch,
                 first_name=author.first_name,
                 last_name=author.last_name,
-                affiliation=author.affiliation,
+                affiliation=author.affiliation or "",
                 api_key=api_keys["wos_api_key"],
+                orcid_ids=orcid_ids,
             )
             future_to_source[future_wos] = "Web of Science"
             available_sources.append("Web of Science")
+
+        # --- Submit ORCID task ---
+        if (api_keys.get("orcid_client_id") and api_keys.get("orcid_client_secret") and 
+            getattr(author, 'orcid_id', None) and orcid_mod is not None):
+            future_orcid = executor.submit(
+                orcid_mod.fetch,
+                orcid_id=author.orcid_id,
+                client_id=api_keys["orcid_client_id"],
+                client_secret=api_keys["orcid_client_secret"],
+            )
+            future_to_source[future_orcid] = "ORCID"
+            available_sources.append("ORCID")
 
         # --- Collect results ---
         for future in concurrent.futures.as_completed(future_to_source):
@@ -680,6 +723,12 @@ Examples:
     parser.add_argument("--wos-key", dest="wos_api_key",
                        default=os.environ.get("WOS_API_KEY"),
                        help="Web of Science API key (or set WOS_API_KEY env var)")
+    parser.add_argument("--orcid-client-id", dest="orcid_client_id",
+                       default=os.environ.get("ORCID_CLIENT_ID"),
+                       help="ORCID client ID (or set ORCID_CLIENT_ID env var)")
+    parser.add_argument("--orcid-client-secret", dest="orcid_client_secret",
+                       default=os.environ.get("ORCID_CLIENT_SECRET"),
+                       help="ORCID client secret (or set ORCID_CLIENT_SECRET env var)")
     
     # Options
     parser.add_argument("--max-gs", dest="max_pubs_g_scholar", type=int, default=100,
@@ -699,6 +748,8 @@ Examples:
     api_keys = {
         "scopus_api_key": args.scopus_api_key,
         "wos_api_key": args.wos_api_key,
+        "orcid_client_id": args.orcid_client_id,
+        "orcid_client_secret": args.orcid_client_secret,
     }
 
     # Create author object
@@ -726,6 +777,8 @@ Examples:
         available_sources.append("Scopus")
     if api_keys.get("wos_api_key") and author.affiliation:
         available_sources.append("Web of Science")
+    if api_keys.get("orcid_client_id") and api_keys.get("orcid_client_secret") and getattr(author, 'orcid_id', None):
+        available_sources.append("ORCID")
     
     if not available_sources:
         print("❌ No data sources available. Please provide:")
@@ -733,6 +786,7 @@ Examples:
         print("   • Scopus ID (--scopus-id)")
         print("   • Scopus API key + affiliation (--scopus-key, --affiliation)")
         print("   • Web of Science API key + affiliation (--wos-key, --affiliation)")
+        print("   • ORCID client ID/secret + ORCID ID (--orcid-client-id, --orcid-client-secret, --scopus-id)")
         sys.exit(1)
     
     print(f"   📚 Sources: {', '.join(available_sources)}")

@@ -522,6 +522,110 @@ def extract_doi_from_links(links: List[str]) -> Optional[str]:
                 
     return None
 
+def parse_journal_info(journal_text: str) -> Dict[str, Optional[str]]:
+    """
+    Parse journal text to extract publisher and page information.
+    
+    Args:
+        journal_text: Raw journal text from Google Scholar
+        
+    Returns:
+        Dictionary with separated journal, publisher, and page information
+    """
+    if not journal_text or not isinstance(journal_text, str):
+        return {
+            'journal': None,
+            'publisher': None, 
+            'volume': None,
+            'issue': None,
+            'page_start': None,
+            'page_end': None,
+            'page_count': None,
+            'issn': None  # Added the missing 'issn' key here
+        }
+    
+    result = {
+        'journal': journal_text.strip(),
+        'publisher': None,
+        'volume': None,
+        'issue': None,
+        'page_start': None,
+        'page_end': None,
+        'page_count': None,
+        'issn': None
+    }
+    
+    # Extract publisher (publishers often appear after a comma followed by spaces)
+    publisher_match = re.search(r',\s*([A-Za-z0-9\s&]+(?:Press|Publishing|Publishers|Books|Publications))(?:,|$)', journal_text)
+    if publisher_match:
+        result['publisher'] = publisher_match.group(1).strip()
+    
+    # Extract volume, issue and pages with pattern matching
+    # Common patterns: "Journal Name, vol(issue), pp. start-end" or "Journal, Volume X, Pages Y-Z"
+    vol_issue_match = re.search(r'(?:,\s*|\s+)(?:Vol(?:ume)?\.?\s*)(\d+)(?:\s*\((\d+)\))?', journal_text, re.IGNORECASE)
+    if vol_issue_match:
+        result['volume'] = vol_issue_match.group(1)
+        if vol_issue_match.group(2):  # Issue is optional
+            result['issue'] = vol_issue_match.group(2)
+    
+    # Extract page range
+    page_match = re.search(r'(?:,\s*|\s+)(?:p|pp|pages?|pg)\.?\s*(\d+)(?:\s*[-–—]\s*(\d+))?', journal_text, re.IGNORECASE)
+    if page_match:
+        result['page_start'] = page_match.group(1)
+        if page_match.group(2):  # End page is optional
+            result['page_end'] = page_match.group(2)
+            # Calculate page count if we have both start and end
+            try:
+                result['page_count'] = int(result['page_end']) - int(result['page_start']) + 1
+            except (ValueError, TypeError):
+                pass
+    
+    # Extract ISSN or numeric identifiers that appear at the end of the string
+    # ISSN pattern: 8 digits with optional hyphen or comma followed by optional digit(s)
+    issn_match = re.search(r'(?:,\s*|,?\s+)(\d{4}-?\d{4})(?:,|$)', journal_text)
+    if issn_match:
+        result['issn'] = issn_match.group(1).strip()
+    
+    # Also look for numeric identifiers at the end (like the example "08982643251345173")
+    numeric_id_match = re.search(r'(?:,\s*|,?\s+)(\d{8,})(?:,|$|\s)', journal_text)
+    if numeric_id_match:
+        # If it looks like an ISSN but is longer, store it as ISSN
+        if not result['issn'] and len(numeric_id_match.group(1)) >= 8:
+            result['issn'] = numeric_id_match.group(1).strip()
+    
+    # Clean journal name from extracted information
+    journal_name = result['journal']
+    
+    # Remove publisher
+    if result['publisher']:
+        journal_name = re.sub(f",\\s*{re.escape(result['publisher'])}(?:,|$)", '', journal_name)
+    
+    # Remove volume/issue
+    if vol_issue_match:
+        journal_name = re.sub(r'(?:,\s*|\s+)(?:Vol(?:ume)?\.?\s*)\d+(?:\s*\(\d+\))?', '', journal_name)
+    
+    # Remove page information
+    if page_match:
+        journal_name = re.sub(r'(?:,\s*|\s+)(?:p|pp|pages?|pg)\.?\s*\d+(?:\s*[-–—]\s*\d+)?', '', journal_name)
+    
+    # Remove ISSN or numeric identifiers 
+    if result['issn']:
+        journal_name = re.sub(r'(?:,\s*|,?\s+)\d{4}-?\d{4}(?:,|$)', '', journal_name)
+    
+    # Remove any standalone numeric sequences at the end (like "08982643251345173, 0")
+    journal_name = re.sub(r'(?:,\s*|,?\s+)\d{8,}(?:,|$|\s)', '', journal_name)
+    
+    # Remove trailing numbers that might be volume/issue identifiers
+    journal_name = re.sub(r',\s*\d+(?:,\s*\d+)*\s*$', '', journal_name)
+    
+    # Clean up any remaining artifacts
+    journal_name = re.sub(r',\s*$', '', journal_name)
+    journal_name = re.sub(r'\s+', ' ', journal_name).strip()
+    
+    result['journal'] = journal_name
+    
+    return result
+
 def _standardize_gs_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Standardize Google Scholar DataFrame columns"""
     if df.empty:
@@ -545,16 +649,30 @@ def _standardize_gs_columns(df: pd.DataFrame) -> pd.DataFrame:
         lambda x: [name.strip() for name in str(x).split(',') if name.strip()] 
         if pd.notna(x) and x != '' else []
     )
-    standardized["journal"] = df.get("journal", None)
+    
+    # Parse journal information to extract publisher and page data
+    journal_info = df.get("journal", "").apply(
+        lambda x: parse_journal_info(x) if pd.notna(x) else parse_journal_info("")
+    )
+    
+    # Assign parsed fields with safe access using .get() to avoid KeyError
+    standardized["journal"] = journal_info.apply(lambda x: x.get('journal', None))
+    standardized["publisher"] = journal_info.apply(lambda x: x.get('publisher', None))
+    standardized["volume"] = journal_info.apply(lambda x: x.get('volume', None))
+    standardized["issue"] = journal_info.apply(lambda x: x.get('issue', None))
+    standardized["page_start"] = journal_info.apply(lambda x: x.get('page_start', None))
+    standardized["page_end"] = journal_info.apply(lambda x: x.get('page_end', None))
+    standardized["page_count"] = journal_info.apply(lambda x: x.get('page_count', None))
+    standardized["issn"] = journal_info.apply(lambda x: x.get('issn', None))  # Using .get() for safe access
+    
     standardized["year"] = df.get("year", None)
     standardized["doi"] = df.get("doi", None)
-    standardized["issn"] = None
     standardized["source"] = "Google Scholar"
     standardized["citations"] = df['citations_numeric']
     standardized["url"] = df.get("puburl", None)
     
-    # Set remaining columns to None
-    for col in ["volume", "issue", "page_start", "page_end", "page_count", "publisher", "links", "gs_id", "work_type"]:
+    # Set remaining columns that weren't handled above
+    for col in ["links", "gs_id", "work_type"]:
         standardized[col] = df.get(col, None)
     
     return standardized
@@ -564,10 +682,11 @@ def _standardize_gs_columns(df: pd.DataFrame) -> pd.DataFrame:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def fetch(
-    gs_id: str,
-    first_name: str,
-    last_name: str,
+    gs_id: str = None,
+    first_name: str = None,
+    last_name: str = None,
     *,
+    orcid_id: str = None,
     max_publications_detail: int = 100,
     headless: bool = False,
     turbo_mode: bool = True,
@@ -577,10 +696,12 @@ def fetch(
 
     Parameters
     ----------
-    gs_id : str
+    gs_id : str, optional
         Google Scholar author ID.
-    first_name, last_name : str
+    first_name, last_name : str, optional
         Author details for metadata.
+    orcid_id : str, optional
+        ORCID ID for additional search capabilities.
     max_publications_detail : int, default 100
         Maximum number of detailed records to fetch.
     headless : bool, default False
@@ -588,10 +709,18 @@ def fetch(
     turbo_mode : bool, default True
         Enable speed optimizations.
     """
+    # If no Google Scholar ID provided, try to find one using ORCID or name
+    if not gs_id and (orcid_id or (first_name and last_name)):
+        # Could implement ORCID to Google Scholar ID lookup here
+        # For now, skip if no Google Scholar ID
+        print("Google Scholar requires a Google Scholar ID")
+        return []
+    
     author_info = {
         'gs_id': gs_id,
-        'first_name': first_name,
-        'last_name': last_name
+        'first_name': first_name or 'Unknown',
+        'last_name': last_name or 'Author',
+        'orcid_id': orcid_id
     }
     
     config = ScrapingConfig(
@@ -616,6 +745,9 @@ def fetch(
         elif isinstance(row.get('authors'), list):
             authors = row['authors']
         
+        # Add extracted ISSN to the publication
+        issn = row.get('issn') if pd.notna(row.get('issn')) else None
+        
         pubs.append(
             Publication(
                 title=str(row.get('title', '')).strip(),  # Preserve original casing
@@ -623,7 +755,7 @@ def fetch(
                 journal=str(row.get('journal', '')) if pd.notna(row.get('journal')) else None,
                 year=int(row['year']) if pd.notna(row.get('year')) and str(row['year']).isdigit() else None,
                 doi=str(row.get('doi', '')) if pd.notna(row.get('doi')) else None,
-                issn=None,
+                issn=issn,  # Pass extracted ISSN to the Publication object
                 source="Google Scholar",
                 citations=int(row.get('citations', 0)),
                 url=str(row.get('url', '')) if pd.notna(row.get('url')) else None,

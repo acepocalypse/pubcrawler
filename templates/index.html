@@ -104,8 +104,7 @@
             <div class="max-w-3xl mx-auto">
                 <h2 class="text-3xl font-light text-center mb-6">Track Publication Coverage</h2>
                 <p class="text-gray-600 text-center mb-8 max-w-2xl mx-auto">
-                    Enter a researcher's name and at least one identifier (Google Scholar ID, Scopus ID, or affiliation) 
-                    to see their publications and which databases index each one. Coverage gaps are highlighted for quick identification.
+                    Enter a researcher's name and at least one identifier and their Google Scholar ID, Scopus ID, and affiliation to see their publications across Google Scholar, Scopus and Web of Science to uncover coverage gaps.
                 </p>
                 
                 <div class="bg-white rounded-xl shadow-light p-6">
@@ -123,9 +122,9 @@
                             </div>
                         </div>
                         
-                        <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Google Scholar ID (Optional)</label>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Google Scholar ID</label>
                                 <input 
                                     type="text" 
                                     id="google-scholar-id"
@@ -134,7 +133,7 @@
                                 >
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Scopus ID (Optional)</label>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Scopus ID</label>
                                 <input 
                                     type="text" 
                                     id="scopus-id"
@@ -143,7 +142,16 @@
                                 >
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Affiliation (Optional)</label>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">ORCID ID</label>
+                                <input 
+                                    type="text" 
+                                    id="orcid-id"
+                                    placeholder="e.g. 0000-0000-0000-0000" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                >
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Affiliation</label>
                                 <input 
                                     type="text" 
                                     id="affiliation"
@@ -163,10 +171,10 @@
                             <div id="api-keys-section" class="hidden mt-3 p-4 bg-gray-50 rounded-lg">
                                 <p class="text-sm text-gray-600 mb-3">
                                     API keys are auto-populated from the configuration. You can override them here if needed.
-                                    Providing API keys enables access to Scopus and Web of Science databases for comprehensive coverage analysis.
+                                    Providing API keys enables access to Scopus, Web of Science, and ORCID databases for comprehensive coverage analysis.
                                     Note: Scopus ID lookup works without an API key for public data, but an API key provides more detailed information.
                                 </p>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Scopus API Key</label>
                                         <input 
@@ -181,6 +189,26 @@
                                         <input 
                                             type="password" 
                                             id="wos-api-key"
+                                            placeholder="Auto-populated (or enter your own)" 
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">ORCID Client ID</label>
+                                        <input 
+                                            type="password" 
+                                            id="orcid-client-id"
+                                            placeholder="Auto-populated (or enter your own)" 
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                        >
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-1 gap-4 mt-3">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">ORCID Client Secret</label>
+                                        <input 
+                                            type="password" 
+                                            id="orcid-client-secret"
                                             placeholder="Auto-populated (or enter your own)" 
                                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                         >
@@ -277,11 +305,17 @@
                         </div>
                         <span>Scopus</span>
                     </div>
-                    <div class="flex items-center">
+                    <div class="flex items-center mr-4">
                         <div class="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center mr-2">
                             <i class="fas fa-globe text-white text-xs"></i>
                         </div>
                         <span>Web of Science</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center mr-2">
+                            <i class="fab fa-orcid text-white text-xs"></i>
+                        </div>
+                        <span>ORCID</span>
                     </div>
                 </div>
 
@@ -454,10 +488,13 @@
                     researcher_name: researcherName,
                     google_scholar_id: document.getElementById('google-scholar-id').value.trim(),
                     scopus_id: document.getElementById('scopus-id').value.trim(),
+                    orcid_id: document.getElementById('orcid-id').value.trim(),
                     affiliation: document.getElementById('affiliation').value.trim(),
                     api_keys: {
                         scopus_api_key: document.getElementById('scopus-api-key').value.trim(),
-                        wos_api_key: document.getElementById('wos-api-key').value.trim()
+                        wos_api_key: document.getElementById('wos-api-key').value.trim(),
+                        orcid_client_id: document.getElementById('orcid-client-id').value.trim(),
+                        orcid_client_secret: document.getElementById('orcid-client-secret').value.trim()
                     },
                     filters: {
                         year_range: document.getElementById('year-filter').value,
@@ -601,8 +638,9 @@
             // Coverage icons with coverage score
             const coverageCount = (pub.coverage.google_scholar ? 1 : 0) + 
                                 (pub.coverage.scopus ? 1 : 0) + 
-                                (pub.coverage.wos ? 1 : 0);
-            const coveragePercentage = Math.round((coverageCount / 3) * 100);
+                                (pub.coverage.wos ? 1 : 0) +
+                                (pub.coverage.orcid ? 1 : 0);
+            const coveragePercentage = Math.round((coverageCount / 4) * 100);
             
             const coverageHtml = `
                 <div class="flex flex-col items-center space-y-2">
@@ -616,8 +654,11 @@
                         <div class="database-icon ${pub.coverage.wos ? 'active' : ''} w-6 h-6 ${pub.coverage.wos ? 'bg-blue-600' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="Web of Science">
                             <i class="fas fa-globe ${pub.coverage.wos ? 'text-white' : 'text-gray-400'} text-xs"></i>
                         </div>
+                        <div class="database-icon ${pub.coverage.orcid ? 'active' : ''} w-6 h-6 ${pub.coverage.orcid ? 'bg-green-600' : 'bg-gray-200'} rounded-full flex items-center justify-center" title="ORCID">
+                            <i class="fab fa-orcid ${pub.coverage.orcid ? 'text-white' : 'text-gray-400'} text-xs"></i>
+                        </div>
                     </div>
-                    <div class="text-xs ${coverageCount === 3 ? 'text-green-600 font-medium' : coverageCount === 2 ? 'text-yellow-600' : 'text-red-600'}">${coverageCount}/3 databases</div>
+                    <div class="text-xs ${coverageCount === 4 ? 'text-green-600 font-medium' : coverageCount >= 3 ? 'text-yellow-600' : coverageCount >= 2 ? 'text-orange-600' : 'text-red-600'}">${coverageCount}/4 databases</div>
                 </div>
             `;
 
@@ -643,6 +684,9 @@
                     } else if (source === 'wos') {
                         badgeColor = 'bg-blue-500';
                         sourceName = 'WoS';
+                    } else if (source === 'orcid') {
+                        badgeColor = 'bg-green-500';
+                        sourceName = 'ORCID';
                     }
                     
                     return `<div class="inline-flex items-center ${badgeColor} text-white text-xs px-2 py-1 rounded-full mr-1 mb-1">
@@ -673,6 +717,9 @@
                 } else if (source === 'wos') {
                     badgeColor = 'bg-blue-500';
                     sourceName = 'Web of Science';
+                } else if (source === 'orcid') {
+                    badgeColor = 'bg-green-500';
+                    sourceName = 'ORCID';
                 }
                 
                 citationHtml = `

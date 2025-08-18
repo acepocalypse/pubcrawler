@@ -2,12 +2,12 @@
 
 A modular pipeline for harvesting academic publications from multiple sources with **index coverage analysis**.
 
-PubCrawler aggregates publications from Google Scholar, Scopus, and Web of Science, deduplicates them, and provides detailed analysis of which databases index each publication - helping identify coverage gaps and improve research visibility.
+PubCrawler aggregates publications from Google Scholar, Scopus, Web of Science, and ORCID, deduplicates them, and provides detailed analysis of which databases index each publication - helping identify coverage gaps and improve research visibility.
 
 ## ✨ Key Features
 
-- **Multi-source aggregation**: Google Scholar, Scopus, Web of Science
-- **🆕 Direct ID Support**: Use Google Scholar IDs, Scopus IDs, or institutional affiliations
+- **Multi-source aggregation**: Google Scholar, Scopus, Web of Science, ORCID
+- **🆕 Direct ID Support**: Use Google Scholar IDs, Scopus IDs, ORCID IDs, or institutional affiliations
 - **🔍 Index Coverage Analysis**: Identify where publications are indexed and where they're missing
 - **Smart deduplication**: Uses DOI matching and fuzzy title matching
 - **Parallel processing**: Fast concurrent data retrieval
@@ -18,11 +18,12 @@ PubCrawler aggregates publications from Google Scholar, Scopus, and Web of Scien
 
 ## 🚀 Recent Improvements
 
+- ✅ **ORCID Support**: Direct lookup using ORCID IDs for authoritative publication data
 - ✅ **Scopus ID Support**: Direct lookup using Scopus Author IDs for faster, more accurate results
 - ✅ **Enhanced Web Interface**: Improved frontend with separate input fields for all ID types
 - ✅ **Better Error Handling**: More informative error messages and suggestions
 - ✅ **Optimized Backend**: Updated aggregation logic to handle multiple ID types efficiently
-- ✅ **All Scrapers Working**: Verified and optimized all three data sources
+- ✅ **All Scrapers Working**: Verified and optimized all four data sources
 
 ## 🔍 Index Coverage Analysis
 
@@ -40,9 +41,9 @@ PubCrawler's unique **coverage analysis** feature helps you understand:
 | Category | Description | Action Needed |
 |----------|-------------|---------------|
 | ✅ Complete Coverage | Indexed in all queried sources | Monitor for new publications |
-| 🟢 Good Coverage | Indexed in 67%+ of sources | Consider submitting to missing databases |
-| 🟡 Partial Coverage | Indexed in 33-66% of sources | Priority for submission to missing sources |
-| 🟠 Limited Coverage | Indexed in <33% of sources | High priority for broader indexing |
+| 🟢 Good Coverage | Indexed in 75%+ of sources | Consider submitting to missing databases |
+| 🟡 Partial Coverage | Indexed in 50-75% of sources | Priority for submission to missing sources |
+| 🟠 Limited Coverage | Indexed in 25-50% of sources | High priority for broader indexing |
 | 🔴 No Coverage | Not found in any source | Investigate publication status |
 
 ### Sample Coverage Report
@@ -67,6 +68,7 @@ PubCrawler's unique **coverage analysis** feature helps you understand:
   • Google Scholar: 82/87 (94.3%) indexed
   • Scopus: 65/87 (74.7%) indexed  
   • Web of Science: 58/87 (66.7%) indexed
+  • ORCID: 50/87 (57.5%) indexed
 
 💡 Recommendations:
   1. 🔍 Consider submitting 22 publications missing from Scopus
@@ -76,7 +78,7 @@ PubCrawler's unique **coverage analysis** feature helps you understand:
 
 ## Features
 
-- **Multi-source aggregation**: Fetch publications from Google Scholar, Scopus, and Web of Science
+- **Multi-source aggregation**: Fetch publications from Google Scholar, Scopus, Web of Science, and ORCID
 - **Intelligent deduplication**: Advanced algorithms using DOI matching and fuzzy title matching
 - **Standardized output**: All sources normalized to consistent data schema
 - **Parallel processing**: Concurrent fetching from multiple sources for speed
@@ -111,7 +113,7 @@ pip install -e .
 
 3. **Search for publications**:
    - Enter a researcher's name
-   - Add Google Scholar ID, Scopus ID, or institutional affiliation
+   - Add Google Scholar ID, Scopus ID, ORCID ID, or institutional affiliation
    - Optionally provide API keys for enhanced access
    - View results with coverage analysis
 
@@ -124,12 +126,16 @@ python -m pubcrawler --first John --last Doe --gs-id ABC123DEF
 # Using Scopus ID for direct lookup
 python -m pubcrawler --first John --last Doe --scopus-id 56518239200
 
+# Using ORCID ID for direct lookup
+python -m pubcrawler --first John --last Doe --orcid-id 0000-0002-1825-0097
+
 # Include all sources (requires API keys)
 python -m pubcrawler \
     --first John --last Doe \
     --affiliation "MIT" \
     --gs-id ABC123DEF \
     --scopus-id 56518239200 \
+    --orcid-id 0000-0002-1825-0097 \
     --scopus-key YOUR_SCOPUS_KEY \
     --wos-key YOUR_WOS_KEY \
     --max-gs 100 \
@@ -148,7 +154,8 @@ author = Author(
     last_name="Doe",
     affiliation="Massachusetts Institute of Technology",
     gs_id="ABC123DEF",           # Google Scholar ID
-    scopus_id="56518239200"      # Scopus Author ID
+    scopus_id="56518239200",      # Scopus Author ID
+    orcid_id="0000-0002-1825-0097" # ORCID ID
 )
 
 # Set up API keys (optional for web scraping, required for API access)
@@ -171,7 +178,7 @@ print(f"Found {len(publications)} unique publications")
 # Get detailed coverage report
 coverage_report = analyze_publication_coverage(
     publications, 
-    available_sources=["Google Scholar", "Scopus", "Web of Science"]
+    available_sources=["Google Scholar", "Scopus", "Web of Science", "ORCID"]
 )
 
 # Show coverage summary
@@ -188,7 +195,7 @@ from pubcrawler.coverage import analyze_publication_coverage, print_coverage_rep
 coverage_report = analyze_publication_coverage(publications)
 
 # Print detailed coverage report
-print_coverage_report(publications, ["Google Scholar", "Scopus", "Web of Science"])
+print_coverage_report(publications, ["Google Scholar", "Scopus", "Web of Science", "ORCID"])
 
 # Access specific gap information
 gaps = coverage_report["gap_analysis"]
@@ -251,6 +258,10 @@ pubs = scopus.fetch("John", "Doe", "MIT", "your_scopus_key")
 # Web of Science only
 from pubcrawler.sources import wos
 pubs = wos.fetch("John", "Doe", "MIT", "your_wos_key")
+
+# ORCID only
+from pubcrawler.sources import orcid
+pubs = orcid.fetch("0000-0002-1825-0097")
 ```
 
 ## Finding Your IDs
@@ -264,6 +275,12 @@ pubs = wos.fetch("John", "Doe", "MIT", "your_wos_key")
 2. Click on the author's name in search results
 3. The ID is in the URL: `https://www.scopus.com/authid/detail.uri?authorId=YOUR_ID_HERE`
 4. Or use the Author Search API to find the ID programmatically
+
+### ORCID ID
+1. Go to the ORCID website
+2. Search for the author or use the direct URL if known: `https://orcid.org/0000-0002-1825-0097`
+3. The ID is the 16-digit number after `/orcid.org/` in the URL
+4. Example: For `https://orcid.org/0000-0002-1825-0097`, the ORCID ID is `0000-0002-1825-0097`
 
 ## Configuration
 
@@ -298,7 +315,7 @@ class Publication:
     year: Optional[int]          # Publication year
     doi: Optional[str]           # Digital Object Identifier
     issn: Optional[str]          # International Standard Serial Number
-    source: str                  # Source database ("Google Scholar", "Scopus", "WoS")
+    source: str                  # Source database ("Google Scholar", "Scopus", "WoS", "ORCID")
     citations: Optional[int]     # Citation count
     url: Optional[str]           # Direct URL to publication
 ```

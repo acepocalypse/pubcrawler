@@ -226,30 +226,42 @@ def _scopus_to_canonical(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fetch(
-    scopus_id: str,
-    api_key: str,
+    scopus_id: str = None,
+    api_key: str = None,
     *,
+    orcid_id: str = None,
+    first_name: str = None,
+    last_name: str = None,
+    affiliation: str = None,
     page_batch: int = 25,
 ) -> List[Publication]:
     """
-    Harvest publications for an author from Scopus using their Scopus ID and return them as a list
+    Harvest publications for an author from Scopus using their Scopus ID, ORCID ID, or name/affiliation and return them as a list
     of :class:`pubcrawler.models.Publication`.
 
     Parameters
     ----------
-    scopus_id : str
+    scopus_id : str, optional
         The Scopus Author ID (numeric string).
     api_key : str
         Your Elsevier/Scopus API key.
+    orcid_id : str, optional
+        ORCID ID to search for in Scopus.
+    first_name, last_name, affiliation : str, optional
+        Author details for name-based search.
     page_batch : int, default 25
         Number of results to fetch per API call.
     """
-    # --- call the internal API client ------------------------------------
-    raw_df = _query_scopus_by_id(
-        scopus_id=scopus_id,
-        api_key=api_key,
-        page_batch=page_batch,
-    )
+    # Determine search strategy
+    if scopus_id and api_key:
+        raw_df = _query_scopus_by_id(scopus_id, api_key, page_batch)
+    elif orcid_id and api_key:
+        raw_df = _query_scopus_by_orcid(orcid_id, api_key, page_batch)
+    elif first_name and last_name and api_key:
+        raw_df = _query_scopus_by_name(first_name, last_name, affiliation, api_key, page_batch)
+    else:
+        print("Error: Insufficient parameters for Scopus search")
+        return []
 
     # --- clean / standardise ---------------------------------------------
     canon_df = _scopus_to_canonical(raw_df)
@@ -272,6 +284,68 @@ def fetch(
         )
 
     return sorted(pubs, key=lambda p: (p.year or 0, p.citations or 0), reverse=True)
+
+
+def _query_scopus_by_orcid(
+    orcid_id: str, api_key: str, page_batch: int = 25
+) -> pd.DataFrame:
+    """Fetches works for a given ORCID ID from Scopus, returning a raw DataFrame."""
+    print(f"Fetching works for ORCID ID: {orcid_id}")
+
+    raw_works = _fetch_scopus_works_by_orcid(orcid_id, api_key, batch_size=page_batch)
+    
+    if not raw_works:
+        print(f"No works found for ORCID ID: {orcid_id}")
+        return pd.DataFrame()
+
+    return pd.json_normalize(raw_works)
+
+
+def _fetch_scopus_works_by_orcid(
+    orcid_id: str, api_key: str, batch_size: int = 25
+) -> list[dict]:
+    """Fetch all publications for an ORCID ID from Scopus."""
+    headers = {"X-ELS-APIKey": api_key, "Accept": "application/json"}
+    works, start_index = [], 0
+    max_api_calls = 50
+    call_count = 0
+
+    # Format ORCID for Scopus search
+    orcid_formatted = orcid_id.replace('https://orcid.org/', '')
+    
+    while call_count < max_api_calls:
+        params = {
+            "query": f"ORCID({orcid_formatted})",
+            "view": "COMPLETE",
+            "start": start_index,
+            "count": batch_size,
+        }
+        try:
+            resp = requests.get(
+                "https://api.elsevier.com/content/search/scopus",
+                headers=headers,
+                params=params,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching works for ORCID ID {orcid_id} (start={start_index}): {e}")
+            break
+
+        batch_entries = data.get("search-results", {}).get("entry", [])
+        if not batch_entries:
+            break
+
+        works.extend(batch_entries)
+        start_index += batch_size
+        call_count += 1
+        time.sleep(0.1)
+
+    if call_count >= max_api_calls:
+        print(f"Warning: Reached API call limit ({max_api_calls}) for ORCID ID {orcid_id}.")
+
+    return works
 
 
 # ---------------------------------------------------------------------------

@@ -99,6 +99,7 @@ def api_search():
         # Extract other parameters
         google_scholar_id = data.get('google_scholar_id', '').strip()
         scopus_id = data.get('scopus_id', '').strip()
+        orcid_id = data.get('orcid_id', '').strip()
         affiliation = data.get('affiliation', '').strip()
         api_keys = data.get('api_keys', {})
         filters = data.get('filters', {})
@@ -109,20 +110,23 @@ def api_search():
             last_name=last_name,
             affiliation=affiliation,
             gs_id=google_scholar_id,
-            scopus_id=scopus_id
+            scopus_id=scopus_id,
+            orcid_id=orcid_id
         )
         
         # Validate that we have enough information to search
-        if not google_scholar_id and not scopus_id and not affiliation:
+        if not google_scholar_id and not scopus_id and not orcid_id and not affiliation:
             return jsonify({
-                'error': 'At least one of the following is required: Google Scholar ID, Scopus ID, or institutional affiliation'
+                'error': 'At least one of the following is required: Google Scholar ID, Scopus ID, ORCID ID, or institutional affiliation'
             }), 400
         
         # Clean API keys - merge user-provided with defaults
         default_keys = get_api_keys()
         clean_api_keys = {
             'scopus_api_key': api_keys.get('scopus_api_key', '').strip() or default_keys.get('scopus_api_key'),
-            'wos_api_key': api_keys.get('wos_api_key', '').strip() or default_keys.get('wos_api_key')
+            'wos_api_key': api_keys.get('wos_api_key', '').strip() or default_keys.get('wos_api_key'),
+            'orcid_client_id': api_keys.get('orcid_client_id', '').strip() or default_keys.get('orcid_client_id'),
+            'orcid_client_secret': api_keys.get('orcid_client_secret', '').strip() or default_keys.get('orcid_client_secret')
         }
         
         # Perform the search
@@ -139,23 +143,27 @@ def api_search():
         available_sources = []
         if google_scholar_id:
             available_sources.append("Google Scholar")
-        if clean_api_keys.get('scopus_api_key') and scopus_id:
+        if clean_api_keys.get('scopus_api_key') and (scopus_id or orcid_id):
             available_sources.append("Scopus")
         elif clean_api_keys.get('scopus_api_key') and affiliation:
             available_sources.append("Scopus")
-        if clean_api_keys.get('wos_api_key') and affiliation:
+        if clean_api_keys.get('wos_api_key') and (affiliation or orcid_id):
             available_sources.append("Web of Science")
+        if (clean_api_keys.get('orcid_client_id') and clean_api_keys.get('orcid_client_secret') and orcid_id):
+            available_sources.append("ORCID")
         
         if not available_sources:
             return jsonify({
                 'error': 'No data sources available. Please provide either:\n' +
                         '• Google Scholar ID, or\n' +
                         '• Scopus ID with API key, or\n' +
+                        '• ORCID ID with client credentials, or\n' +
                         '• Institutional affiliation (for Scopus/Web of Science access)',
                 'suggestions': [
                     'Add a Google Scholar ID for basic search',
                     'Add a Scopus ID for targeted Scopus search',
-                    'Add institutional affiliation for comprehensive coverage',
+                    'Add an ORCID ID for comprehensive coverage',
+                    'Add institutional affiliation for broader coverage',
                     'Verify API keys are valid and have proper permissions'
                 ]
             }), 400
@@ -180,6 +188,7 @@ def api_search():
                 'affiliation': affiliation,
                 'gs_id': google_scholar_id,
                 'scopus_id': scopus_id,
+                'orcid_id': orcid_id,
                 'search_timestamp': datetime.now().isoformat()
             },
             'summary': {
@@ -402,7 +411,8 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
     coverage = {
         'google_scholar': False,
         'scopus': False,
-        'wos': False
+        'wos': False,
+        'orcid': False
     }
     
     # Track citations from each source
@@ -412,7 +422,7 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
     source_lower = pub.source.lower() if pub.source else ""
     if 'multiple sources:' in source_lower:
         # Parse the merged sources with citation information
-        # Format: "Multiple sources: Google Scholar (45 cites), Scopus (52 cites)"
+        # Format: "Multiple sources: Google Scholar (45 cites), Scopus (52 cites), ORCID (0 cites)"
         import re
         
         if 'google scholar' in source_lower:
@@ -435,6 +445,13 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
             match = re.search(r'(?:web of science|wos) \((\d+) cites?\)', source_lower)
             if match:
                 source_citations['wos'] = int(match.group(1))
+        
+        if 'orcid' in source_lower:
+            coverage['orcid'] = True
+            # Extract citation count for ORCID
+            match = re.search(r'orcid \((\d+) cites?\)', source_lower)
+            if match:
+                source_citations['orcid'] = int(match.group(1))
     else:
         # Single source publication - mark its source and look for fuzzy matches
         if 'google scholar' in source_lower:
@@ -446,6 +463,9 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         elif 'web of science' in source_lower or 'wos' in source_lower:
             coverage['wos'] = True
             source_citations['wos'] = clean_value(pub.citations) or 0
+        elif 'orcid' in source_lower:
+            coverage['orcid'] = True
+            source_citations['orcid'] = clean_value(pub.citations) or 0
         
         # If we have all publications, check for duplicates across sources using fuzzy matching
         if all_publications:
@@ -498,6 +518,13 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
                         match = re.search(r'(?:web of science|wos) \((\d+) cites?\)', other_source_lower)
                         if match:
                             source_citations['wos'] = int(match.group(1))
+                    
+                    if 'orcid' in other_source_lower and not coverage['orcid']:
+                        coverage['orcid'] = True
+                        # Extract citation count for ORCID
+                        match = re.search(r'orcid \((\d+) cites?\)', other_source_lower)
+                        if match:
+                            source_citations['orcid'] = int(match.group(1))
                 else:
                     # Handle single sources
                     if 'google scholar' in other_source_lower and not coverage['google_scholar']:
@@ -509,6 +536,9 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
                     elif ('web of science' in other_source_lower or 'wos' in other_source_lower) and not coverage['wos']:
                         coverage['wos'] = True
                         source_citations['wos'] = match_citations
+                    elif 'orcid' in other_source_lower and not coverage['orcid']:
+                        coverage['orcid'] = True
+                        source_citations['orcid'] = match_citations
     
     # Clean and format all values for JSON
     formatted_pub = {
