@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PubCrawler</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
@@ -75,6 +76,32 @@
                 border-radius: 0.5rem;
             }
         }
+        /* --- citation box sizing/spacing --- */
+        .citations-cell { min-width: 210px; }          
+        .citation-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(82px, 1fr)); 
+          gap: 9px;                        
+        }
+        .citation-box {
+          padding: 9px 10px;                         
+          border-radius: 9px;                             
+          text-align: center;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.06);    
+          min-width: 82px;                                
+        }
+        .citation-box .count {
+          font-weight: 700;
+          font-size: 1rem;                            
+          line-height: 1.1;
+          margin-bottom: 1px;                           
+        }
+        .citation-box .label {
+          font-size: 0.625rem;                             
+          line-height: 1;
+          white-space: nowrap;
+          opacity: 0.9;
+        }
     </style>
 </head>
 <body class="bg-light-bg text-gray-900 min-h-screen">
@@ -104,13 +131,14 @@
             <div class="max-w-3xl mx-auto">
                 <h2 class="text-3xl font-light text-center mb-6">Track Publication Coverage</h2>
                 <p class="text-gray-600 text-center mb-8 max-w-2xl mx-auto">
-                    Enter a researcher's name and identifiers to analyze their publication coverage across Google Scholar, Scopus, Web of Science, and ORCID.
+                    Enter a researcher's name and identifiers to analyze their publication coverage across Google Scholar, Scopus, Web of Science, and ORCID. 
+                    For best Web of Science results, provide a Web of Science Author ID.
                 </p>
                 
                 <div class="bg-white rounded-xl shadow-light p-6">
                     <form id="search-form">
                         <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
-                            <div class="flex-grow">
+                            <div class="flex-grow md:flex-[2]">
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Researcher Name</label>
                                 <input 
                                     type="text" 
@@ -118,6 +146,15 @@
                                     placeholder="e.g. Albert Einstein" 
                                     class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                     required
+                                >
+                            </div>
+                            <div class="flex-grow md:flex-[1]">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Affiliation</label>
+                                <input 
+                                    type="text" 
+                                    id="affiliation"
+                                    placeholder="e.g. Purdue University" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                 >
                             </div>
                         </div>
@@ -142,20 +179,20 @@
                                 >
                             </div>
                             <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Web of Science ID</label>
+                                <input 
+                                    type="text" 
+                                    id="wos-id"
+                                    placeholder="e.g. B-1234-5678, ResearcherID" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
+                                >
+                            </div>
+                            <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">ORCID ID</label>
                                 <input 
                                     type="text" 
                                     id="orcid-id"
                                     placeholder="e.g. 0000-0000-0000-0000" 
-                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
-                                >
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Affiliation</label>
-                                <input 
-                                    type="text" 
-                                    id="affiliation"
-                                    placeholder="e.g. MIT, Purdue University" 
                                     class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                 >
                             </div>
@@ -554,6 +591,7 @@
                     researcher_name: researcherName,
                     google_scholar_id: document.getElementById('google-scholar-id').value.trim(),
                     scopus_id: document.getElementById('scopus-id').value.trim(),
+                    wos_id: document.getElementById('wos-id').value.trim(),
                     orcid_id: document.getElementById('orcid-id').value.trim(),
                     affiliation: document.getElementById('affiliation').value.trim(),
                     api_keys: {
@@ -657,6 +695,9 @@
             if (data.researcher.scopus_id) {
                 infoText += `${infoText ? ' • ' : ''}Scopus ID: ${data.researcher.scopus_id}`;
             }
+            if (data.researcher.wos_id) {
+                infoText += `${infoText ? ' • ' : ''}WoS ID: ${data.researcher.wos_id}`;
+            }
             if (data.researcher.orcid_id) {
                 infoText += `${infoText ? ' • ' : ''}ORCID ID: ${data.researcher.orcid_id}`;
             }
@@ -751,25 +792,24 @@
                 const citations = pub.source_citations && pub.source_citations[source.key];
                 const isIndexed = citations !== null && citations !== undefined;
                 const count = isIndexed ? citations : 0;
-                
-                const boxStyle = isIndexed 
+
+                const boxStyle = isIndexed
                     ? `background-color: ${source.color}; color: white; border: 2px solid ${source.color};`
                     : `background-color: #f3f4f6; color: #9ca3af; border: 2px solid #e5e7eb;`;
-                
+
                 return `
-                    <div class="flex flex-col items-center justify-center px-3 py-2 rounded text-xs font-medium min-w-0" 
-                         style="${boxStyle}" 
-                         title="${source.fullName}${isIndexed ? ': ' + count + ' citations' : ': Not indexed'}">
-                        <div class="font-bold text-base leading-tight mb-1">${count}</div>
-                        <div class="text-xs leading-tight opacity-90">${source.name}</div>
-                    </div>
+                  <div class="citation-box" style="${boxStyle}" 
+                       title="${source.fullName}${isIndexed ? ': ' + count + ' citations' : ': Not indexed'}">
+                    <div class="count">${count}</div>
+                    <div class="label">${source.name}</div>
+                  </div>
                 `;
             }).join('');
             
             citationHtml = `
-                <div class="grid grid-cols-2 gap-2 max-w-40 mx-auto">
-                    ${sourceBoxes}
-                </div>
+              <div class="citation-grid mx-auto">
+                ${sourceBoxes}
+              </div>
             `;
 
             row.innerHTML = `
@@ -780,7 +820,7 @@
                 <td data-label="Year" class="py-4 px-6">${pub.year || 'N/A'}</td>
                 <td data-label="Journal" class="py-4 px-6">${pub.journal || 'Unknown'}</td>
                 <td data-label="DOI" class="py-4 px-6">${doiHtml}</td>
-                <td data-label="Citations by Database" class="py-4 px-6">${citationHtml}</td>
+                <td data-label="Citations by Database" class="py-4 px-6 citations-cell">${citationHtml}</td>
                 <td data-label="Coverage" class="py-4 px-6">${coverageHtml}</td>
             `;
 

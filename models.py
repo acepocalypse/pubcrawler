@@ -102,7 +102,7 @@ class Author:
     scopus_id : Optional[str]
         Scopus Author ID.
     wos_id : Optional[str]
-        Web of Science ResearcherID.
+        Web of Science Author ID (preferred for targeted WoS searches).
     orcid_id : Optional[str]
         ORCID ID.
     """
@@ -111,7 +111,7 @@ class Author:
     affiliation: Optional[str] = None
     gs_id: Optional[str] = None      # Google Scholar ID
     scopus_id: Optional[str] = None  # Scopus Author ID
-    wos_id: Optional[str] = None     # Web of Science ResearcherID
+    wos_id: Optional[str] = None     # Web of Science Author ID (preferred for WoS searches)
     orcid_id: Optional[str] = None   # ORCID ID
     
     @property

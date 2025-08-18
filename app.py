@@ -99,6 +99,7 @@ def api_search():
         # Extract other parameters
         google_scholar_id = data.get('google_scholar_id', '').strip()
         scopus_id = data.get('scopus_id', '').strip()
+        wos_id = data.get('wos_id', '').strip()
         orcid_id = data.get('orcid_id', '').strip()
         affiliation = data.get('affiliation', '').strip()
         api_keys = data.get('api_keys', {})
@@ -110,13 +111,14 @@ def api_search():
             affiliation=affiliation,
             gs_id=google_scholar_id,
             scopus_id=scopus_id,
+            wos_id=wos_id,
             orcid_id=orcid_id
         )
         
         # Validate that we have enough information to search
-        if not google_scholar_id and not scopus_id and not orcid_id and not affiliation:
+        if not google_scholar_id and not scopus_id and not wos_id and not orcid_id and not affiliation:
             return jsonify({
-                'error': 'At least one of the following is required: Google Scholar ID, Scopus ID, ORCID ID, or institutional affiliation'
+                'error': 'At least one of the following is required: Google Scholar ID, Scopus ID, Web of Science ID, ORCID ID, or institutional affiliation'
             }), 400
         
         # Clean API keys - merge user-provided with defaults
@@ -146,7 +148,7 @@ def api_search():
             available_sources.append("Scopus")
         elif clean_api_keys.get('scopus_api_key') and affiliation:
             available_sources.append("Scopus")
-        if clean_api_keys.get('wos_api_key') and (affiliation or orcid_id):
+        if clean_api_keys.get('wos_api_key') and (wos_id or affiliation or orcid_id):
             available_sources.append("Web of Science")
         if (clean_api_keys.get('orcid_client_id') and clean_api_keys.get('orcid_client_secret') and orcid_id):
             available_sources.append("ORCID")
@@ -161,6 +163,7 @@ def api_search():
                 'suggestions': [
                     'Add a Google Scholar ID for basic search',
                     'Add a Scopus ID for targeted Scopus search',
+                    'Add a Web of Science ID for targeted WoS search',
                     'Add an ORCID ID for comprehensive coverage',
                     'Add institutional affiliation for broader coverage',
                     'Verify API keys are valid and have proper permissions'
@@ -184,6 +187,7 @@ def api_search():
                 'affiliation': affiliation,
                 'gs_id': google_scholar_id,
                 'scopus_id': scopus_id,
+                'wos_id': wos_id,
                 'orcid_id': orcid_id,  # Keep as orcid_id for frontend consistency
                 'search_timestamp': datetime.now().isoformat()
             },

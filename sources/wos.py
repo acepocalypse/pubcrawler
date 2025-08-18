@@ -6,7 +6,8 @@ Web of Science harvesting module for the **pubcrawler** pipeline.
     fetch(first_name, last_name, affiliation, api_key, **options) -> list[Publication]
     ----------------------------------------------------------------------------------
     • Wraps the Web of Science Starter API (or Expanded API if available).
-    • Finds publications based on author name and affiliation.
+    • Prioritizes Web of Science Author ID searches for accurate, targeted results.
+    • Falls back to name and affiliation searches when Author ID is not available.
     • Converts the raw JSON response into the pipeline's *canonical* schema
       (see models.Publication).
     • Returns `List[Publication]` ready for aggregation.
@@ -14,6 +15,8 @@ Web of Science harvesting module for the **pubcrawler** pipeline.
 Note: This implementation uses the Web of Science Starter API which has different
 endpoints and data structures compared to the Expanded API. Adjust accordingly
 based on your API access level.
+
+For best results, provide Web of Science Author IDs when available.
 """
 
 from __future__ import annotations
@@ -47,8 +50,8 @@ __all__ = ["fetch"]
 # 1) Helpers
 # ---------------------------------------------------------------------------
 
-def _create_retry_session(max_retries: int = 3, backoff_factor: float = 1.0) -> requests.Session:
-    """Create a requests session with retry logic for transient failures."""
+def _create_retry_session(max_retries: int = 3, backoff_factor: float = 1.5) -> requests.Session:
+    """Create a requests session with enhanced retry logic for transient failures."""
     session = requests.Session()
     
     # Define which HTTP status codes should trigger a retry
@@ -61,9 +64,11 @@ def _create_retry_session(max_retries: int = 3, backoff_factor: float = 1.0) -> 
         backoff_factor=backoff_factor,
         status_forcelist=status_forcelist,
         allowed_methods=["GET"],  # Only retry GET requests
+        respect_retry_after_header=True,  # Honor server retry-after headers
+        raise_on_status=False,  # Don't raise HTTPError, let us handle status codes
     )
     
-    adapter = HTTPAdapter(max_retries=retry_strategy)
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=5, pool_maxsize=10)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     
@@ -145,74 +150,120 @@ def deduplicate_by_doi(df: pd.DataFrame) -> pd.DataFrame:
 def _collect_wos_documents(
     author_id: str,
     api_key: str,
-    limit_per_page: int = 100,
+    limit_per_page: int = 50,
 ) -> list[dict]:
     """Collect WoS documents using author ID with enhanced API handling."""
-    headers = {"X-ApiKey": api_key}
+    headers = {
+        "X-ApiKey": api_key,
+        "Accept": "application/json",
+        "User-Agent": "pubcrawler/1.0"
+    }
     base_url = "https://api.clarivate.com/apis/wos-starter/v1/documents"
-    query = f'AI=("{author_id}")'
-
+    
+    # Try different query formats for better compatibility
+    # Some WoS Author IDs work better with different query structures
+    query_formats = [
+        f'AI=("{author_id}")',      # Standard format with quotes
+        f'AI={author_id}',          # Without quotes
+        f'AI="{author_id}"',        # Alternative format
+    ]
+    
     page = 1
     all_hits: list[dict] = []
-    session = _create_retry_session(max_retries=3, backoff_factor=1.0)
+    session = _create_retry_session(max_retries=3, backoff_factor=1.5)
     
-    while True:
-        params = {"q": query, "db": "WOS", "limit": limit_per_page, "page": page}
+    # Try each query format until we get results or exhaust all options
+    for query_idx, query in enumerate(query_formats):
+        page = 1
+        hits_found = False
         
-        try:
-            resp = session.get(base_url, headers=headers, params=params, timeout=30)
+        if query_idx > 0:
+            print(f"🔄 Trying alternative query format {query_idx + 1} for WoS Author ID: {author_id}")
+        
+        while True:
+            params = {"q": query, "db": "WOS", "limit": limit_per_page, "page": page}
             
-            if resp.status_code != 200:
-                error_message = f"WoS API error: {resp.status_code} - {resp.text}"
-                if resp.status_code == 403:
-                    error_message += "\n💡 This usually means your API key doesn't have access to the Web of Science service."
-                elif resp.status_code == 401:
-                    error_message += "\n💡 Authentication failed. Please check your API key."
-                elif resp.status_code == 429:
-                    error_message += "\n💡 Rate limit exceeded. Please wait before making more requests."
-                elif resp.status_code == 504:
-                    error_message += "\n💡 Gateway timeout occurred. The request will be retried automatically."
-                raise RuntimeError(error_message)
-            
-            data = resp.json()
-            hits = data.get("hits", [])
-            
-            if not hits:
-                break
-            
-            # Enhance records with identifier information
-            for rec in hits:
-                ids = rec.get("identifiers", {})
-                rec["doi"] = ids.get("doi", "")
-                rec["issn"] = ids.get("issn", "")
-                rec["eissn"] = ids.get("eissn", "")
-            
-            all_hits.extend(hits)
-            
-            if len(hits) < limit_per_page:
-                break
+            try:
+                # Use more conservative timeout settings
+                resp = session.get(base_url, headers=headers, params=params, timeout=(5, 30))
                 
-            page += 1
-            time.sleep(0.2)  # Be respectful to the API
+                if resp.status_code != 200:
+                    error_message = f"WoS API error: {resp.status_code} - {resp.text}"
+                    if resp.status_code == 403:
+                        error_message += "\n💡 This usually means your API key doesn't have access to the Web of Science service."
+                    elif resp.status_code == 401:
+                        error_message += "\n💡 Authentication failed. Please check your API key."
+                    elif resp.status_code == 429:
+                        error_message += "\n💡 Rate limit exceeded. Please wait before making more requests."
+                        # Add exponential backoff for rate limiting
+                        time.sleep(min(2 ** (query_idx + 1), 30))  # Reduced max wait
+                    elif resp.status_code == 504:
+                        error_message += "\n💡 Gateway timeout occurred. Trying different query format if available."
+                    
+                    # If it's a 504 or rate limiting, try next query format
+                    if resp.status_code in [504, 429]:
+                        print(f"⚠️ {error_message}")
+                        break  # Try next query format
+                    else:
+                        raise RuntimeError(error_message)
+                
+                data = resp.json()
+                hits = data.get("hits", [])
+                
+                if not hits:
+                    if page == 1:
+                        # No results with this query format, try next one
+                        break
+                    else:
+                        # End of results for this query format
+                        break
+                
+                hits_found = True
+                
+                # Enhance records with identifier information
+                for rec in hits:
+                    ids = rec.get("identifiers", {})
+                    rec["doi"] = ids.get("doi", "")
+                    rec["issn"] = ids.get("issn", "")
+                    rec["eissn"] = ids.get("eissn", "")
+                
+                all_hits.extend(hits)
+                
+                if len(hits) < limit_per_page:
+                    break  # Last page for this query format
+                    
+                page += 1
+                time.sleep(0.3)  # Slightly longer delay between requests
+                
+            except requests.exceptions.Timeout:
+                print(f"⚠️ Request timeout for WoS Author ID {author_id} (query format {query_idx + 1}, page {page}). Trying next format.")
+                break
+            except requests.exceptions.ConnectionError as e:
+                print(f"⚠️ Connection error for WoS Author ID {author_id} (query format {query_idx + 1}, page {page}): {e}")
+                break
+            except requests.exceptions.HTTPError as e:
+                if e.response and e.response.status_code == 504:
+                    print(f"⚠️ Gateway timeout for WoS Author ID {author_id} (query format {query_idx + 1}, page {page}). Trying next format.")
+                    break
+                else:
+                    print(f"⚠️ HTTP error for WoS Author ID {author_id} (query format {query_idx + 1}, page {page}): {e}")
+                    break
+            except requests.exceptions.RequestException as e:
+                print(f"⚠️ Error querying Web of Science for Author ID {author_id} (query format {query_idx + 1}, page {page}): {e}")
+                break
+            except RuntimeError as e:
+                print(f"⚠️ {e}")
+                break
+        
+        # If we found results with this query format, we're done
+        if hits_found:
+            if query_idx > 0:
+                print(f"✅ Found results using query format {query_idx + 1} for WoS Author ID: {author_id}")
+            break
             
-        except requests.exceptions.Timeout:
-            print(f"⚠️ Request timeout for WoS Author ID {author_id} (page {page}). Skipping remaining pages.")
-            break
-        except requests.exceptions.ConnectionError as e:
-            print(f"⚠️ Connection error for WoS Author ID {author_id} (page {page}): {e}")
-            break
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 504:
-                print(f"⚠️ Gateway timeout for WoS Author ID {author_id} (page {page}). Retries were exhausted.")
-            else:
-                print(f"⚠️ HTTP error for WoS Author ID {author_id} (page {page}): {e}")
-            break
-        except requests.exceptions.RequestException as e:
-            print(f"⚠️ Error querying Web of Science for Author ID {author_id} (page {page}): {e}")
-            break
-        except RuntimeError as e:
-            print(f"⚠️ {e}")
-            break
+        # Add delay before trying next query format
+        if query_idx < len(query_formats) - 1:
+            time.sleep(1.0)
     
     session.close()
     return all_hits
@@ -224,7 +275,7 @@ def _search_wos_by_name_affiliation(
     
     headers = {"X-ApiKey": api_key}
     base_url = "https://api.clarivate.com/apis/wos-starter/v1/documents"
-    session = _create_retry_session(max_retries=3, backoff_factor=1.0)
+    session = _create_retry_session(max_retries=2, backoff_factor=1.0)
     
     # Try multiple query variations
     query_variations = [
@@ -260,7 +311,8 @@ def _search_wos_by_name_affiliation(
                 }
                 
                 try:
-                    resp = session.get(base_url, headers=headers, params=params, timeout=30)
+                    # Use conservative timeout settings
+                    resp = session.get(base_url, headers=headers, params=params, timeout=(5, 25))
                     
                     if resp.status_code != 200:
                         error_message = f"WoS API error: {resp.status_code} - {resp.text}"
@@ -290,7 +342,7 @@ def _search_wos_by_name_affiliation(
                         break
                         
                     page += 1
-                    time.sleep(0.2)
+                    time.sleep(0.4)  # More conservative delay
                     
                 except requests.exceptions.Timeout:
                     print(f"⚠️ Request timeout for query variation {query_idx + 1} (page {page}). Trying next variation.")
@@ -299,7 +351,7 @@ def _search_wos_by_name_affiliation(
                     print(f"⚠️ Connection error for query variation {query_idx + 1} (page {page}): {e}")
                     break
                 except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 504:
+                    if e.response and e.response.status_code == 504:
                         print(f"⚠️ Gateway timeout for query variation {query_idx + 1} (page {page}). Retries exhausted, trying next variation.")
                     else:
                         print(f"⚠️ HTTP error for query variation {query_idx + 1} (page {page}): {e}")
@@ -316,6 +368,10 @@ def _search_wos_by_name_affiliation(
         if all_hits:
             session.close()
             return all_hits
+        
+        # Add delay before trying next query variation
+        if query_idx < len(query_variations) - 1:
+            time.sleep(0.5)
     
     session.close()
     return []
@@ -505,6 +561,7 @@ def fetch(
         Your Web of Science API key.
     author_ids : List[str], optional
         WoS Author IDs to search by. If provided, these take precedence over name search.
+        This is now the preferred method for searching.
     max_records : int, default 100
         Maximum number of records to fetch.
     """
@@ -512,15 +569,17 @@ def fetch(
     all_dfs = []
     has_timeout_errors = False
     
-    # Try author ID search first if provided
+    # Prioritize author ID search if provided
     if author_ids:
         author_ids = normalize_wos_ids(author_ids)
+        print(f"🔍 Searching Web of Science using Author IDs: {', '.join(author_ids)}")
         for aid in author_ids:
             try:
                 df = _wos_pipeline_single(aid, api_key, limit_per_page=50)
                 if not df.empty:
                     df["wos_author_id"] = aid
                     all_dfs.append(df)
+                    print(f"✅ Found {len(df)} publications for WoS Author ID: {aid}")
             except Exception as e:
                 error_msg = str(e)
                 if "504" in error_msg or "gateway timeout" in error_msg.lower():
@@ -529,12 +588,14 @@ def fetch(
                 else:
                     print(f"⚠️ Failed to fetch for Author ID={aid}: {e}")
     
-    # Fallback to name/affiliation search if no other results
-    if not all_dfs:
+    # Fallback to name/affiliation search if no author ID results and affiliation is available
+    if not all_dfs and affiliation:
+        print(f"🔍 No results from Author ID search, falling back to name/affiliation search for {first_name} {last_name} at {affiliation}")
         try:
             df = _wos_pipeline_name_based(first_name, last_name, affiliation, api_key, max_records)
             if not df.empty:
                 all_dfs.append(df)
+                print(f"✅ Found {len(df)} publications using name/affiliation search")
         except Exception as e:
             error_msg = str(e)
             if "504" in error_msg or "gateway timeout" in error_msg.lower():
@@ -543,11 +604,19 @@ def fetch(
             else:
                 print(f"⚠️ Failed to fetch by name/affiliation: {e}")
     
+    # Handle case where no search methods are available
+    if not all_dfs and not author_ids and not affiliation:
+        print("⚠️ Web of Science search requires either Author ID(s) or institutional affiliation")
+        return []
+    
     # Combine results
     if not all_dfs:
         if has_timeout_errors:
             print("ℹ️ No results due to gateway timeouts. The Web of Science servers may be experiencing high load.")
             print("ℹ️ Please try again in a few minutes. The request will automatically retry transient errors.")
+            print("ℹ️ Consider using different WoS Author ID formats if available (e.g., ResearcherID vs. Author ID).")
+        else:
+            print("ℹ️ No publications found in Web of Science with the provided criteria")
         return []
     
     combined_df = pd.concat(all_dfs, ignore_index=True)
@@ -593,6 +662,7 @@ if __name__ == "__main__":
     # --- Configuration for manual test ---
     load_dotenv()
     WOS_API_KEY = os.environ.get("WOS_API_KEY")
+    WOS_AUTHOR_ID = "B-1234-5678"  # Example WoS Author ID (preferred)
     FIRST_NAME = "Morgan"
     LAST_NAME = "Furze"
     AFFILIATION = "Purdue University"
@@ -601,13 +671,25 @@ if __name__ == "__main__":
         print("Error: WOS_API_KEY environment variable not set.")
         print("Please set it to your Web of Science API key to run this test.")
     else:
-        print(f"Fetching Web of Science data for {FIRST_NAME} {LAST_NAME} @ {AFFILIATION}...")
-        publications = fetch(
-            first_name=FIRST_NAME,
-            last_name=LAST_NAME,
-            affiliation=AFFILIATION,
-            api_key=WOS_API_KEY,
-        )
+        # Test with Author ID (preferred method)
+        if WOS_AUTHOR_ID:
+            print(f"Fetching Web of Science data using Author ID: {WOS_AUTHOR_ID}")
+            publications = fetch(
+                first_name=FIRST_NAME,
+                last_name=LAST_NAME,
+                affiliation=AFFILIATION,
+                api_key=WOS_API_KEY,
+                author_ids=[WOS_AUTHOR_ID]
+            )
+        else:
+            # Fallback to name/affiliation search
+            print(f"Fetching Web of Science data for {FIRST_NAME} {LAST_NAME} @ {AFFILIATION}...")
+            publications = fetch(
+                first_name=FIRST_NAME,
+                last_name=LAST_NAME,
+                affiliation=AFFILIATION,
+                api_key=WOS_API_KEY,
+            )
 
         print(f"\n✅ Fetched {len(publications)} publications from Web of Science.")
         if publications:

@@ -7,7 +7,7 @@ PubCrawler aggregates publications from Google Scholar, Scopus, Web of Science, 
 ## ✨ Key Features
 
 - **Multi-source aggregation**: Google Scholar, Scopus, Web of Science, ORCID
-- **🆕 Direct ID Support**: Use Google Scholar IDs, Scopus IDs, ORCID IDs, or institutional affiliations
+- **🆕 Direct ID Support**: Use Google Scholar IDs, Scopus IDs, Web of Science IDs, ORCID IDs, or institutional affiliations
 - **🔍 Index Coverage Analysis**: Identify where publications are indexed and where they're missing
 - **Smart deduplication**: Uses DOI matching and fuzzy title matching
 - **Parallel processing**: Fast concurrent data retrieval
@@ -20,6 +20,7 @@ PubCrawler aggregates publications from Google Scholar, Scopus, Web of Science, 
 
 - ✅ **ORCID Support**: Direct lookup using ORCID IDs for authoritative publication data
 - ✅ **Scopus ID Support**: Direct lookup using Scopus Author IDs for faster, more accurate results
+- ✅ **Web of Science ID Support**: Direct lookup using WoS Author IDs for targeted, accurate results
 - ✅ **Enhanced Web Interface**: Improved frontend with separate input fields for all ID types
 - ✅ **Better Error Handling**: More informative error messages and suggestions
 - ✅ **Optimized Backend**: Updated aggregation logic to handle multiple ID types efficiently
@@ -113,7 +114,7 @@ pip install -e .
 
 3. **Search for publications**:
    - Enter a researcher's name
-   - Add Google Scholar ID, Scopus ID, ORCID ID, or institutional affiliation
+   - Add Google Scholar ID, Scopus ID, Web of Science ID, ORCID ID, or institutional affiliation
    - Optionally provide API keys for enhanced access
    - View results with coverage analysis
 
@@ -155,6 +156,7 @@ author = Author(
     affiliation="Massachusetts Institute of Technology",
     gs_id="ABC123DEF",           # Google Scholar ID
     scopus_id="56518239200",      # Scopus Author ID
+    wos_id="B-1234-5678",        # Web of Science Author ID (preferred for WoS)
     orcid_id="0000-0002-1825-0097" # ORCID ID
 )
 
@@ -275,6 +277,13 @@ pubs = orcid.fetch("0000-0002-1825-0097")
 2. Click on the author's name in search results
 3. The ID is in the URL: `https://www.scopus.com/authid/detail.uri?authorId=YOUR_ID_HERE`
 4. Or use the Author Search API to find the ID programmatically
+
+### Web of Science Author ID
+1. Log into Web of Science and search for the author
+2. Click on the author's name in search results
+3. Look for the Author Identifier (e.g., `B-1234-5678`) on the author profile page
+4. This can also be found in the ResearcherID system
+5. Example formats: `B-1234-5678`, `A-1234-2022`, etc.
 
 ### ORCID ID
 1. Go to the ORCID website

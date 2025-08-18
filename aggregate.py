@@ -636,13 +636,17 @@ def aggregate_publications(
             available_sources.append("Scopus")
 
         # --- Submit Web of Science task ---
-        if api_keys.get("wos_api_key") and author.affiliation and wos_mod is not None:
+        if api_keys.get("wos_api_key") and (author.wos_id or author.affiliation) and wos_mod is not None:
+            # Prepare author_ids if WoS ID is available
+            wos_author_ids = [author.wos_id] if author.wos_id else None
+            
             future_wos = executor.submit(
                 wos_mod.fetch,
                 first_name=author.first_name,
                 last_name=author.last_name,
                 affiliation=author.affiliation or "",
                 api_key=api_keys["wos_api_key"],
+                author_ids=wos_author_ids,
             )
             future_to_source[future_wos] = "Web of Science"
             available_sources.append("Web of Science")
