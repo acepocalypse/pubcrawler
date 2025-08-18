@@ -131,17 +131,29 @@ def deduplicate_by_doi(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or "doi" not in df.columns:
         return df
 
-    df = df[df["doi"].notna() & (df["doi"].str.strip() != "")].copy()
-    df["completeness_score"] = df.notna().sum(axis=1)
-    df["citation_score"] = pd.to_numeric(df["citations"], errors="coerce").fillna(0)
-    df["_rank"] = (
-        df.groupby("doi")[["completeness_score", "citation_score"]]
+    # Separate records with and without DOIs
+    has_doi = df["doi"].notna() & (df["doi"].str.strip() != "")
+    df_with_doi = df[has_doi].copy()
+    df_without_doi = df[~has_doi].copy()
+    
+    # If no records have DOIs, return original
+    if df_with_doi.empty:
+        return df.reset_index(drop=True)
+    
+    # Deduplicate only records with DOIs
+    df_with_doi["completeness_score"] = df_with_doi.notna().sum(axis=1)
+    df_with_doi["citation_score"] = pd.to_numeric(df_with_doi["citations"], errors="coerce").fillna(0)
+    df_with_doi["_rank"] = (
+        df_with_doi.groupby("doi")[["completeness_score", "citation_score"]]
         .transform(lambda x: -x.rank(method="first"))
         .sum(axis=1)
     )
-    df = df.sort_values("_rank").drop_duplicates("doi", keep="first")
-    df.drop(columns=["completeness_score", "citation_score", "_rank"], inplace=True)
-    return df.reset_index(drop=True)
+    df_with_doi = df_with_doi.sort_values("_rank").drop_duplicates("doi", keep="first")
+    df_with_doi.drop(columns=["completeness_score", "citation_score", "_rank"], inplace=True)
+    
+    # Combine deduplicated DOI records with non-DOI records
+    result_df = pd.concat([df_with_doi, df_without_doi], ignore_index=True)
+    return result_df.reset_index(drop=True)
 
 # ---------------------------------------------------------------------------
 # 2) Enhanced API Fetcher
