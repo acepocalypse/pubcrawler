@@ -387,7 +387,7 @@
                             <select id="sort-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-gray-800 focus:border-transparent">
                                 <option value="newest">Newest First</option>
                                 <option value="oldest">Oldest First</option>
-                                <option value="most-cited">Most Cited</option>
+                                <option value="most-cited" selected>Most Cited</option>
                                 <option value="title">Title A-Z</option>
                                 <option value="journal">Journal A-Z</option>
                             </select>
@@ -758,15 +758,12 @@
             // Initialize year range based on actual data
             initializeYearRange();
             
-            data.publications.forEach(pub => {
-                const row = createPublicationRow(pub);
-                tableBody.appendChild(row);
-            });
+            // Default sort to Most Cited and render via filters
+            const sortEl = document.getElementById('sort-filter');
+            if (sortEl) sortEl.value = 'most-cited';
+            applyFilters();
 
-            // Initialize filter counts
-            updateFilterCounts(data.publications.length, data.publications.length);
-
-            // Show results
+            // resultsSection visibility and scroll remain
             resultsSection.classList.remove('hidden');
             resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
@@ -903,6 +900,9 @@
             }
         }
 
+        // New: tri-state source filter state (0=any, 1=include, -1=exclude)
+        let sourceFilterState = { google_scholar: 0, scopus: 0, wos: 0, orcid: 0 };
+
         function clearFilters() {
             const searchElement = document.getElementById('search-filter');
             const sourceElement = document.getElementById('source-filter');
@@ -912,7 +912,7 @@
             
             if (searchElement) searchElement.value = '';
             if (sourceElement) sourceElement.value = 'all';
-            if (sortElement) sortElement.value = 'newest';
+            if (sortElement) sortElement.value = 'most-cited';
             if (yearMinElement) yearMinElement.value = '';
             if (yearMaxElement) yearMaxElement.value = '';
 
@@ -922,9 +922,6 @@
 
             applyFilters();
         }
-
-        // New: tri-state source filter state (0=any, 1=include, -1=exclude)
-        let sourceFilterState = { google_scholar: 0, scopus: 0, wos: 0, orcid: 0 };
 
         function applyFilters() {
             if (!currentSearchResults || !originalPublications.length) return;
@@ -1163,6 +1160,25 @@
 
         function anySourceFilterActive() {
             return Object.values(sourceFilterState).some(v => v !== 0);
+        }
+
+        // New: setup icon toggles and visuals
+        function initSourceIconFilters() {
+            const toggles = document.querySelectorAll('.source-toggle');
+            toggles.forEach(el => {
+                const key = el.dataset.source;
+                // Initialize visual to neutral
+                updateSourceToggleVisual(el, sourceFilterState[key] || 0);
+
+                el.addEventListener('click', () => {
+                    const curr = sourceFilterState[key] || 0;
+                    // Cycle: 0 (any) -> 1 (include) -> -1 (exclude) -> 0
+                    const next = curr === 0 ? 1 : (curr === 1 ? -1 : 0);
+                    sourceFilterState[key] = next;
+                    updateSourceToggleVisual(el, next);
+                    applyFilters();
+                });
+            });
         }
 
         // Initialize event listeners
