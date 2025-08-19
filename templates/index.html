@@ -336,7 +336,38 @@
                             >
                         </div>
                         
-                        <!-- Source Filter -->
+                        <!-- New: Icon-based Source Filter (tri-state: Include → Exclude → Any) -->
+                        <div class="flex items-center" id="icon-source-filter">
+                            <label class="text-sm text-gray-600 mr-2">Sources:</label>
+                            <div class="flex items-center space-x-2">
+                                <div class="source-toggle relative" data-source="google_scholar" title="Google Scholar (click to cycle Include → Exclude → Any)">
+                                    <div class="icon-wrap w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition text-gray-500" style="background-color: #e5e7eb;">
+                                        <i class="fab fa-google text-xs"></i>
+                                    </div>
+                                    <i class="fas fa-ban ban-icon absolute -top-1 -right-1 text-red-500 text-xs hidden"></i>
+                                </div>
+                                <div class="source-toggle relative" data-source="scopus" title="Scopus (click to cycle Include → Exclude → Any)">
+                                    <div class="icon-wrap w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition text-gray-500" style="background-color: #e5e7eb;">
+                                        <i class="fas fa-database text-xs"></i>
+                                    </div>
+                                    <i class="fas fa-ban ban-icon absolute -top-1 -right-1 text-red-500 text-xs hidden"></i>
+                                </div>
+                                <div class="source-toggle relative" data-source="wos" title="Web of Science (click to cycle Include → Exclude → Any)">
+                                    <div class="icon-wrap w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition text-gray-500" style="background-color: #e5e7eb;">
+                                        <i class="fas fa-globe text-xs"></i>
+                                    </div>
+                                    <i class="fas fa-ban ban-icon absolute -top-1 -right-1 text-red-500 text-xs hidden"></i>
+                                </div>
+                                <div class="source-toggle relative" data-source="orcid" title="ORCID (click to cycle Include → Exclude → Any)">
+                                    <div class="icon-wrap w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition text-gray-500" style="background-color: #e5e7eb;">
+                                        <i class="fab fa-orcid text-xs"></i>
+                                    </div>
+                                    <i class="fas fa-ban ban-icon absolute -top-1 -right-1 text-red-500 text-xs hidden"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Existing Source Filter select (kept; overridden when icons used) -->
                         <div class="flex items-center">
                             <label class="text-sm text-gray-600 mr-2">Source:</label>
                             <select id="source-filter" class="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-gray-800 focus:border-transparent">
@@ -740,6 +771,18 @@
             resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
+        // Normalize a DOI value that may be a DOI, a DOI URL, or prefixed with "doi:"
+        function normalizeDoiValue(val) {
+            if (!val) return null;
+            let s = String(val).trim();
+            s = s.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '');
+            s = s.replace(/^doi:\s*/i, '');
+            s = s.split(/[?#\s]/)[0];
+            s = s.replace(/[\u200B-\u200D\u2060]/g, '');
+            s = s.replace(/\s*/g, '');
+            return s && /^10\.\d{4,9}\/\S+$/i.test(s) ? s.toLowerCase() : null;
+        }
+
         function createPublicationRow(pub) {
             const row = document.createElement('tr');
             row.className = 'publication-row';
@@ -774,10 +817,11 @@
                 </div>
             `;
 
-            // DOI link
-            const doiHtml = pub.doi ? 
-                `<a href="https://doi.org/${pub.doi}" target="_blank" class="text-blue-600 hover:underline text-sm">${pub.doi}</a>` : 
-                '<span class="text-gray-400 text-sm">No DOI</span>';
+            // DOI link (robust to DOI URL or "doi:" prefixes)
+            const normalizedDoi = normalizeDoiValue(pub.doi);
+            const doiHtml = normalizedDoi
+                ? `<a href="https://doi.org/${normalizedDoi}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline text-sm">${normalizedDoi}</a>`
+                : '<span class="text-gray-400 text-sm">No DOI</span>';
 
             // Citations by Source - Always show a consistent 2x2 grid format
             let citationHtml = '';
@@ -787,19 +831,30 @@
                 { key: 'wos', name: 'WoS', fullName: 'Web of Science', color: '#5e33c0' },
                 { key: 'orcid', name: 'ORCID', fullName: 'ORCID', color: '#a5cd3b' }
             ];
-            
+
             const sourceBoxes = sources.map(source => {
                 const citations = pub.source_citations && pub.source_citations[source.key];
-                const isIndexed = citations !== null && citations !== undefined;
-                const count = isIndexed ? citations : 0;
+                let isIndexed, count;
+
+                if (source.key === 'orcid') {
+                    // Use coverage to decide styling; value is always N/A
+                    isIndexed = (pub.coverage && pub.coverage.orcid) === true;
+                    count = 'N/A';
+                } else {
+                    isIndexed = citations !== null && citations !== undefined;
+                    count = isIndexed ? citations : 0;
+                }
 
                 const boxStyle = isIndexed
                     ? `background-color: ${source.color}; color: white; border: 2px solid ${source.color};`
                     : `background-color: #f3f4f6; color: #9ca3af; border: 2px solid #e5e7eb;`;
 
+                const titleText = source.key === 'orcid'
+                    ? (isIndexed ? `${source.fullName}: N/A` : `${source.fullName}: Not indexed`)
+                    : `${source.fullName}${isIndexed ? ': ' + count + ' citations' : ': Not indexed'}`;
+
                 return `
-                  <div class="citation-box" style="${boxStyle}" 
-                       title="${source.fullName}${isIndexed ? ': ' + count + ' citations' : ': Not indexed'}">
+                  <div class="citation-box" style="${boxStyle}" title="${titleText}">
                     <div class="count">${count}</div>
                     <div class="label">${source.name}</div>
                   </div>
@@ -860,9 +915,16 @@
             if (sortElement) sortElement.value = 'newest';
             if (yearMinElement) yearMinElement.value = '';
             if (yearMaxElement) yearMaxElement.value = '';
-            
+
+            // New: reset icon-based source filter to neutral
+            Object.keys(sourceFilterState).forEach(k => sourceFilterState[k] = 0);
+            document.querySelectorAll('.source-toggle').forEach(el => updateSourceToggleVisual(el, 0));
+
             applyFilters();
         }
+
+        // New: tri-state source filter state (0=any, 1=include, -1=exclude)
+        let sourceFilterState = { google_scholar: 0, scopus: 0, wos: 0, orcid: 0 };
 
         function applyFilters() {
             if (!currentSearchResults || !originalPublications.length) return;
@@ -900,7 +962,20 @@
 
             // Source filter
             const sourceElement = document.getElementById('source-filter');
-            if (sourceElement) {
+
+            if (anySourceFilterActive()) {
+                // New: tri-state per-source filtering overrides dropdown
+                filtered = filtered.filter(pub => {
+                    const coverage = pub.coverage || {};
+                    // All active constraints must pass
+                    for (const [key, state] of Object.entries(sourceFilterState)) {
+                        if (state === 1 && coverage[key] !== true) return false;   // require present
+                        if (state === -1 && coverage[key] === true) return false;  // require absent
+                    }
+                    return true;
+                });
+            } else if (sourceElement) {
+                // Existing dropdown behavior when icons are neutral
                 const sourceFilter = sourceElement.value;
                 if (sourceFilter !== 'all') {
                     if (sourceFilter === 'all-four') {
@@ -913,7 +988,7 @@
                     } else {
                         const sourceMap = {
                             'google-scholar': 'google_scholar',
-                            'scopus': 'scopus', 
+                            'scopus': 'scopus',
                             'wos': 'wos',
                             'orcid': 'orcid'
                         };
@@ -1035,6 +1110,67 @@
         function showSettings() {
             alert('Settings panel coming soon!');
         }
+
+        // New: setup icon toggles and visuals
+        function initSourceIconFilters() {
+            const toggles = document.querySelectorAll('.source-toggle');
+            toggles.forEach(el => {
+                const key = el.dataset.source;
+                // Initialize visual to neutral
+                updateSourceToggleVisual(el, sourceFilterState[key] || 0);
+
+                el.addEventListener('click', () => {
+                    const curr = sourceFilterState[key] || 0;
+                    // Cycle: 0 (any) -> 1 (include) -> -1 (exclude) -> 0
+                    const next = curr === 0 ? 1 : (curr === 1 ? -1 : 0);
+                    sourceFilterState[key] = next;
+                    updateSourceToggleVisual(el, next);
+                    applyFilters();
+                });
+            });
+        }
+
+        function updateSourceToggleVisual(el, state) {
+            const key = el.dataset.source;
+            const iconWrap = el.querySelector('.icon-wrap');
+            const banIcon = el.querySelector('.ban-icon');
+            const colors = { google_scholar: '#4286f5', scopus: '#eb6601', wos: '#5e33c0', orcid: '#a5cd3b' };
+            const names = { google_scholar: 'Google Scholar', scopus: 'Scopus', wos: 'Web of Science', orcid: 'ORCID' };
+
+            // Reset classes
+            iconWrap.className = 'icon-wrap w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition';
+            iconWrap.style.backgroundColor = '';
+            iconWrap.classList.remove('text-white');
+
+            // Apply per-state visuals
+            if (state === 1) { // include
+                iconWrap.style.backgroundColor = colors[key];
+                iconWrap.classList.add('text-white', 'ring-2', 'ring-offset-2');
+                if (banIcon) banIcon.classList.add('hidden');
+                el.title = `${names[key]}: Include (click to exclude)`;
+            } else if (state === -1) { // exclude
+                iconWrap.style.backgroundColor = '#ffffff';
+                iconWrap.classList.add('text-gray-400', 'border', 'border-gray-300', 'opacity-70');
+                if (banIcon) banIcon.classList.remove('hidden');
+                el.title = `${names[key]}: Exclude (click for any)`;
+            } else { // any
+                iconWrap.style.backgroundColor = '#e5e7eb';
+                iconWrap.classList.add('text-gray-500');
+                if (banIcon) banIcon.classList.add('hidden');
+                el.title = `${names[key]}: Any (click to include)`;
+            }
+        }
+
+        function anySourceFilterActive() {
+            return Object.values(sourceFilterState).some(v => v !== 0);
+        }
+
+        // Initialize event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeEventListeners();
+            // New: init icon-based source filter
+            initSourceIconFilters();
+        });
     </script>
 </body>
 </html>
