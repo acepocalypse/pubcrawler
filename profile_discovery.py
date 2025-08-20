@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+import itertools
+import inspect
 
 import requests
 from rapidfuzz import fuzz
@@ -72,9 +74,10 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GS_COOKIES_PATH = os.path.join(BASE_DIR, ".gs_search_cookies.json")
 DEFAULT_USER_AGENT = "ProfileDiscoveryBot/1.0"
-MIN_NAME_SIMILARITY = 0.9
-MAX_SEARCH_ATTEMPTS = 3
+MIN_NAME_SIMILARITY = 0.85
+MAX_SEARCH_ATTEMPTS = 2
 MAX_DRIVER_TIMEOUT = 45
+MAX_PUBLICATION_SAMPLES = 3
 
 # Data Models
 @dataclass
@@ -87,6 +90,8 @@ class ProfileCandidate:
     sample_publications: List[str] = field(default_factory=list)
     profile_url: Optional[str] = None
     verification_info: Optional[Dict] = field(default_factory=dict)
+    # New: total number of publications (if known)
+    publication_count: Optional[int] = None
 
 @dataclass
 class DiscoveryResult:
@@ -116,8 +121,15 @@ class BaseDiscovery:
         
         # Add affiliation score if available (30% weight)
         if query_aff and result_aff:
-            affil_score = fuzz.partial_ratio(query_aff.lower(), result_aff.lower()) / 100.0
+            # Use both partial_ratio and token_sort_ratio for better affiliation matching
+            affil_score1 = fuzz.partial_ratio(query_aff.lower(), result_aff.lower()) / 100.0
+            affil_score2 = fuzz.token_sort_ratio(query_aff.lower(), result_aff.lower()) / 100.0
+            affil_score = max(affil_score1, affil_score2)
             confidence += affil_score * 0.3
+            
+            # Bonus for strong affiliation matches (e.g., "Purdue University" in both)
+            if affil_score >= 0.8:
+                confidence += 0.1
         elif query_aff and not result_aff:
             # Small penalty for missing affiliation when expected
             confidence *= 0.9
@@ -364,6 +376,7 @@ class GoogleScholarDiscovery(BaseDiscovery):
         proxies = api_keys.get('proxies') or []
         self.proxy_pool = proxies if isinstance(proxies, list) else ([proxies] if proxies else [])
         self.stealth_driver = OptimizedStealthDriver()
+        self._last_driver = None  # Store last successful driver for reuse
 
     def search_profiles(self, first_name: str, last_name: str, affiliation: str = None) -> List[ProfileCandidate]:
         """Search for profiles with and without affiliation using a single driver session."""
@@ -415,6 +428,9 @@ class GoogleScholarDiscovery(BaseDiscovery):
                 if session_candidates:
                     all_candidates.extend(session_candidates)
                     logger.info(f"Session successful. Found {len(session_candidates)} total candidates.")
+                    # Store driver for potential reuse instead of cleaning up
+                    self._last_driver = driver
+                    driver = None  # Prevent cleanup in finally block
                     break
 
             except Exception as e:
@@ -426,7 +442,9 @@ class GoogleScholarDiscovery(BaseDiscovery):
                 if attempt < MAX_SEARCH_ATTEMPTS:
                     self._wait_before_retry(attempt)
             finally:
-                self._cleanup_driver(driver)
+                # Only cleanup if we're not storing the driver for reuse
+                if driver is not None:
+                    self._cleanup_driver(driver)
 
         if not all_candidates:
             logger.warning(f"All {MAX_SEARCH_ATTEMPTS} session attempts failed")
@@ -481,8 +499,6 @@ class GoogleScholarDiscovery(BaseDiscovery):
         if affiliation:
             queries.append((f"{full_name} {affiliation}", "with affiliation"))
         return queries
-
-    # ...existing code... (remove _attempt_search_with_retries method as it's no longer needed)
 
     def _get_proxy_for_attempt(self, attempt: int) -> Optional[str]:
         """Get proxy for the given attempt number."""
@@ -691,11 +707,53 @@ class GoogleScholarDiscovery(BaseDiscovery):
                         "cited_by": cited_text
                     }
                 )
+
+                # New: try to populate publication_count for discovery tab
+                pub_count = self._extract_inline_publication_count(profile_div)
+                estimated = False
+                if not pub_count and profile_id:
+                    pub_count = self._fetch_gs_publication_count(profile_id)
+                    estimated = bool(pub_count)  # this count is a minimum estimate if present
+                if pub_count is not None:
+                    candidate.publication_count = pub_count
+                    candidate.verification_info["publication_count"] = pub_count
+                    if estimated:
+                        candidate.verification_info["publication_count_is_min"] = True
+
                 candidates.append(candidate)
             except Exception as e:
                 logger.debug(f"Error parsing profile block: {e}")
 
         return candidates
+
+    # New helpers: publication count extraction for Google Scholar
+    def _extract_inline_publication_count(self, profile_div) -> Optional[int]:
+        """Best-effort parse of publication count if inline text shows it."""
+        import re
+        try:
+            text = profile_div.get_text(" ", strip=True)
+            m = re.search(r'\bPublications?\s*:?\s*(\d+)\b', text, re.IGNORECASE)
+            if m:
+                return int(m.group(1))
+        except Exception:
+            pass
+        return None
+
+    def _fetch_gs_publication_count(self, profile_id: str) -> Optional[int]:
+        """Lightweight HTTP fetch to count visible rows on profile page as a minimum estimate."""
+        try:
+            from bs4 import BeautifulSoup
+            headers = {'User-Agent': DEFAULT_USER_AGENT}
+            url = f"https://scholar.google.com/citations?user={profile_id}&hl=en&view_op=list_works&sortby=pubdate"
+            resp = requests.get(url, headers=headers, timeout=8)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            rows = soup.select("tr.gsc_a_tr")
+            if rows:
+                return len(rows)
+        except Exception as e:
+            logger.debug(f"GS publication count fetch failed for {profile_id}: {e}")
+        return None
 
 class ORCIDDiscovery(BaseDiscovery):
     """Discover ORCID profiles using the public search API."""
@@ -704,24 +762,29 @@ class ORCIDDiscovery(BaseDiscovery):
         self.search_base_url = "https://pub.orcid.org/v3.0/search"
 
     def search_profiles(self, first_name: str, last_name: str, affiliation: str = None) -> List[ProfileCandidate]:
+        """Optimized ORCID search with combined query approach."""
         all_candidates = []
         
-        # Try both searches: without and with affiliation
-        queries_to_try = [
-            [f'given-names:{first_name.strip()}', f'family-name:{last_name.strip()}']
-        ]
-        
+        # Start with affiliation-based search if available, then fall back to name-only
         if affiliation:
-            queries_to_try.append([
-                f'given-names:{first_name.strip()}', 
+            # Try comprehensive search first
+            query_parts = [
+                f'given-names:{first_name.strip()}',
                 f'family-name:{last_name.strip()}',
                 f'affiliation-org-name:{affiliation.strip()}'
-            ])
-        
-        for query_idx, query_parts in enumerate(queries_to_try):
-            search_type = "without affiliation" if query_idx == 0 else "with affiliation"
-            candidates = self._perform_search(query_parts, search_type, f"{first_name} {last_name}", affiliation)
+            ]
+            candidates = self._perform_search(query_parts, "with affiliation", f"{first_name} {last_name}", affiliation)
             all_candidates.extend(candidates)
+            
+            # If we got high-confidence matches, skip name-only search
+            if any(c.confidence_score >= 0.9 for c in candidates):
+                logger.info("High-confidence ORCID match found with affiliation, skipping name-only search")
+                return self._dedupe_and_sort_candidates(all_candidates)
+        
+        # Name-only search (always do this if no high-confidence affiliation match)
+        query_parts = [f'given-names:{first_name.strip()}', f'family-name:{last_name.strip()}']
+        candidates = self._perform_search(query_parts, "name only", f"{first_name} {last_name}", affiliation)
+        all_candidates.extend(candidates)
         
         return self._dedupe_and_sort_candidates(all_candidates)
 
@@ -773,18 +836,39 @@ class ORCIDDiscovery(BaseDiscovery):
                 family = family_name.get('value', '') if family_name else ''
                 profile_name = f"{given} {family}".strip() or query_name
 
-                # Extract affiliation
-                profile_affiliation = self._extract_affiliation(person)
-                confidence = self._calculate_confidence(query_name, profile_name, query_affiliation, profile_affiliation)
+                # Extract other candidate names (credit-name and other-names) for matching
+                other_names = self._extract_other_names(person)
 
-                candidates.append(ProfileCandidate(
+                # Extract affiliation (very noisy in ORCID; tiny influence)
+                profile_affiliation = self._extract_affiliation(person)
+
+                # New: fetch works count before computing confidence (for small boost)
+                pub_count = self._fetch_orcid_publication_count(orcid_id)
+
+                # ORCID-specific confidence scoring (name-first, minimal affiliation)
+                confidence = self._calculate_orcid_confidence(
+                    query_name=query_name,
+                    result_name=profile_name,
+                    query_aff=query_affiliation,
+                    result_aff=profile_affiliation,
+                    works_count=pub_count,
+                    other_names=other_names
+                )
+
+                candidate = ProfileCandidate(
                     source="ORCID",
                     profile_id=orcid_id,
                     name=profile_name,
                     affiliation=profile_affiliation,
                     confidence_score=confidence,
                     profile_url=f"https://orcid.org/{orcid_id}"
-                ))
+                )
+
+                if pub_count is not None:
+                    candidate.publication_count = pub_count
+                    candidate.verification_info["publication_count"] = pub_count
+
+                candidates.append(candidate)
 
             except Exception as e:
                 logger.warning(f"Error parsing ORCID result: {e}")
@@ -807,6 +891,89 @@ class ORCIDDiscovery(BaseDiscovery):
                         return org_name
         return None
 
+    def _extract_other_names(self, person: Dict) -> List[str]:
+        names: List[str] = []
+        try:
+            name_info = person.get('name', {}) or {}
+            credit = name_info.get('credit-name') or {}
+            credit_val = (credit.get('value') or credit.get('content') or "").strip()
+            if credit_val:
+                names.append(credit_val)
+
+            other_names = (person.get('other-names') or {}).get('other-name') or []
+            if isinstance(other_names, dict):
+                other_names = [other_names]
+            for on in other_names:
+                val = (on.get('value') or on.get('content') or "").strip()
+                if val:
+                    names.append(val)
+        except Exception:
+            pass
+        return names
+
+    def _calculate_orcid_confidence(
+        self,
+        query_name: str,
+        result_name: str,
+        query_aff: Optional[str],
+        result_aff: Optional[str],
+        works_count: Optional[int] = None,
+        other_names: Optional[List[str]] = None
+    ) -> float:
+        other_names = other_names or []
+        try:
+            # Best name score across primary and alternate names
+            base_names = [result_name] + [n for n in other_names if n]
+            best_name = 0.0
+            q = (query_name or "").lower()
+            for n in base_names:
+                best_name = max(best_name, fuzz.ratio(q, (n or "").lower()) / 100.0)
+
+            # Gate: require a solid name match
+            if best_name < MIN_NAME_SIMILARITY:
+                return 0.0
+
+            # Heavily weight name match
+            confidence = best_name * 0.93
+
+            # Very small affiliation contribution due to ORCID noisiness
+            if query_aff and result_aff:
+                aff = max(
+                    fuzz.partial_ratio(query_aff.lower(), result_aff.lower()) / 100.0,
+                    fuzz.token_set_ratio(query_aff.lower(), result_aff.lower()) / 100.0
+                )
+                confidence += aff * 0.03
+                if aff >= 0.8:
+                    confidence += 0.01
+
+            # Small works-count bump (log-scale)
+            if isinstance(works_count, int) and works_count > 0:
+                import math
+                confidence += min(0.04, math.log10(works_count + 1) * 0.03)
+
+            # Strong baseline for name-only matches when no affiliation provided
+            if (not query_aff or not str(query_aff).strip()) and best_name >= MIN_NAME_SIMILARITY:
+                confidence = max(confidence, 0.88)
+
+            return float(min(1.0, max(0.0, confidence)))
+        except Exception:
+            return 0.0
+
+    def _fetch_orcid_publication_count(self, orcid_id: str) -> Optional[int]:
+        """Return the number of unique works (groups) for an ORCID iD."""
+        url = f"https://pub.orcid.org/v3.0/{orcid_id}/works"
+        headers = {'Accept': 'application/json', 'User-Agent': DEFAULT_USER_AGENT}
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            groups = data.get('group', [])
+            if isinstance(groups, list):
+                return len(groups)
+        except Exception as e:
+            logger.debug(f"ORCID works count fetch failed for {orcid_id}: {e}")
+        return None
+    
 class ScopusDiscovery(BaseDiscovery):
     """Discover Scopus Author IDs using the Author Search API."""
     
@@ -815,28 +982,32 @@ class ScopusDiscovery(BaseDiscovery):
         self.search_base_url = "https://api.elsevier.com/content/search/author"
     
     def search_profiles(self, first_name: str, last_name: str, affiliation: str = None) -> List[ProfileCandidate]:
+        """Optimized Scopus search with early termination and sample fetching during discovery."""
         if not self.api_key:
             logger.warning("Scopus API key not provided, skipping discovery.")
             return []
         
         all_candidates = []
         
-        # Try both searches: without and with affiliation
-        queries_to_try = [
-            [f'AUTHFIRST("{first_name}")', f'AUTHLASTNAME("{last_name}")']
-        ]
-        
+        # Start with affiliation-based search if available
         if affiliation:
-            queries_to_try.append([
+            query_parts = [
                 f'AUTHFIRST("{first_name}")', 
                 f'AUTHLASTNAME("{last_name}")',
                 f'AFFIL("{affiliation}")'
-            ])
-        
-        for query_idx, query_parts in enumerate(queries_to_try):
-            search_type = "without affiliation" if query_idx == 0 else "with affiliation"
-            candidates = self._perform_search(query_parts, search_type, f"{first_name} {last_name}", affiliation)
+            ]
+            candidates = self._perform_search(query_parts, "with affiliation", f"{first_name} {last_name}", affiliation)
             all_candidates.extend(candidates)
+            
+            # If we got high-confidence matches, skip name-only search
+            if any(c.confidence_score >= 0.9 for c in candidates):
+                logger.info("High-confidence Scopus match found with affiliation, skipping name-only search")
+                return self._dedupe_and_sort_candidates(all_candidates)
+        
+        # Name-only search
+        query_parts = [f'AUTHFIRST("{first_name}")', f'AUTHLASTNAME("{last_name}")']
+        candidates = self._perform_search(query_parts, "name only", f"{first_name} {last_name}", affiliation)
+        all_candidates.extend(candidates)
         
         return self._dedupe_and_sort_candidates(all_candidates)
 
@@ -876,55 +1047,426 @@ class ScopusDiscovery(BaseDiscovery):
                 confidence = self._calculate_scopus_confidence(query_name, profile_name, 
                                                              query_affiliation, profile_affiliation, doc_count)
                 
-                candidates.append(ProfileCandidate(
+                candidate = ProfileCandidate(
                     source="Scopus",
                     profile_id=author_id,
                     name=profile_name,
                     affiliation=profile_affiliation,
                     confidence_score=confidence,
                     profile_url=f"https://www.scopus.com/authid/detail.uri?authorId={author_id}",
-                    verification_info={'document_count': doc_count}
-                ))
+                    verification_info={'document_count': doc_count},
+                    publication_count=doc_count
+                )
+
+                # Try to fetch sample publications during discovery
+                sample_pubs = self._fetch_scopus_sample_publications(author_id)
+                if sample_pubs:
+                    candidate.sample_publications = sample_pubs
+                    candidate.verification_info['sample_count'] = len(sample_pubs)
+                else:
+                    logger.debug(f"No sample publications fetched for Scopus author {author_id}")
+
+                candidates.append(candidate)
             except Exception as e:
                 logger.warning(f"Error parsing Scopus result: {e}")
 
         return sorted(candidates, key=lambda x: x.confidence_score, reverse=True)
 
+    def _fetch_scopus_sample_publications(self, author_id: str) -> List[str]:
+        """Fetch sample publications via the canonical scopus.fetch(scopus_id, api_key)."""
+        try:
+            if not self.api_key:
+                return []
+            pubs = scopus.fetch(scopus_id=author_id, api_key=self.api_key, page_batch=MAX_PUBLICATION_SAMPLES)
+            titles = [getattr(p, "title", str(p)) for p in pubs if getattr(p, "title", None)]
+            return titles[:MAX_PUBLICATION_SAMPLES]
+        except Exception as e:
+            logger.debug(f"Failed to fetch Scopus sample publications via scopus.fetch for {author_id}: {e}")
+            return []
+        
     def _calculate_scopus_confidence(self, query_name: str, result_name: str, 
-                                   query_aff: Optional[str], result_aff: Optional[str], doc_count: int) -> float:
-        """Calculate confidence score including document count."""
+                                    query_aff: Optional[str], result_aff: Optional[str], doc_count: int) -> float:
+        """Calculate confidence score with emphasis on name matching, minimal affiliation weight."""
         name_score = fuzz.ratio(query_name.lower(), result_name.lower()) / 100.0
         
         if name_score < MIN_NAME_SIMILARITY:
             return 0.0
             
-        confidence = name_score * 0.6
+        # Heavy emphasis on name matching (90% weight)
+        confidence = name_score * 0.9
         
-        # Add affiliation score if available
+        # Minimal affiliation weight (5%) since Scopus often has partial/department info
         if query_aff and result_aff:
             affil_score = fuzz.partial_ratio(query_aff.lower(), result_aff.lower()) / 100.0
-            confidence += affil_score * 0.3
+            confidence += affil_score * 0.05
         
-        # Add document count bonus (up to 0.1)
-        confidence += min(0.1, doc_count / 100.0)
+        # Document count bonus (up to 5%)
+        confidence += min(0.05, doc_count / 100.0)
 
-        # Enforce minimum confidence for name-only matches (no affiliation provided)
+        # High baseline for strong name matches when no affiliation provided
         if (not query_aff or not str(query_aff).strip()) and name_score >= MIN_NAME_SIMILARITY:
-            confidence = max(confidence, 0.75)
+            confidence = max(confidence, 0.85)
         
         return min(1.0, confidence)
 
 class WOSDiscovery(BaseDiscovery):
-    """Placeholder for Web of Science Author ID discovery."""
-    
+    """Discover Web of Science ResearcherIDs via the Starter (documents) API."""
+    BASE_URL = "https://api.clarivate.com/apis/wos-starter/v1/documents"
+
     def __init__(self, api_key: str):
         self.api_key = api_key
-    
+
+    # ---------- public ----------
     def search_profiles(self, first_name: str, last_name: str, affiliation: str = None) -> List[ProfileCandidate]:
         if not self.api_key:
             return []
-        logger.info("Web of Science author discovery is not yet implemented.")
-        return []
+
+        full_name = f"{first_name} {last_name}".strip()
+        headers = {"X-ApiKey": self.api_key, "Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT}
+
+        # Query variations: with and without affiliation (try a few syntaxes)
+        q_variants: List[tuple[str, str]] = []
+        if affiliation:
+            q_variants.extend([
+                (f'AU=("{last_name}, {first_name}") AND AD=("{affiliation}")', "with affiliation (AD)"),
+                (f'AU=("{last_name}, {first_name}") AND OG=("{affiliation}")', "with affiliation (OG)"),
+            ])
+        q_variants.append((f'AU=("{last_name}, {first_name}")', "name only"))
+
+        # Collect hits across variations until we have “enough”
+        seen_uids = set()
+        all_hits: List[dict] = []
+        for q, label in q_variants:
+            hits = self._collect_hits(headers, q, limit_per_page=50, max_total=200)
+            # Deduplicate by WoS UID across variants
+            new_hits = [h for h in hits if h.get("uid") not in seen_uids]
+            for h in new_hits:
+                uid = h.get("uid")
+                if uid:
+                    seen_uids.add(uid)
+            all_hits.extend(new_hits)
+
+            # Early stop if we already have a good number of hits
+            if len(all_hits) >= 120:
+                break
+
+        # Mine ResearcherIDs from authors, aggregate by ResearcherID
+        candidates = self._extract_candidates_from_hits(all_hits, full_name, affiliation)
+
+        # Final dedupe/sort using common helper
+        return self._dedupe_and_sort_candidates(candidates)
+
+    # ---------- internals ----------
+    def _collect_hits(self, headers: Dict[str, str], q: str, *, limit_per_page: int = 50, max_total: int = 200) -> List[dict]:
+        """Paginate Starter API results for a given query with simple retry/backoff."""
+        all_hits: List[dict] = []
+        page = 1
+        backoff = 1.5
+
+        while len(all_hits) < max_total:
+            remaining = max_total - len(all_hits)
+            limit = max(1, min(limit_per_page, remaining))
+            params = {"q": q, "db": "WOS", "limit": limit, "page": page}
+
+            try:
+                resp = requests.get(self.BASE_URL, headers=headers, params=params, timeout=(5, 30))
+            except requests.RequestException:
+                time.sleep(backoff)
+                backoff = min(30.0, backoff * 1.7)
+                break
+
+            if resp.status_code == 200:
+                data = resp.json() or {}
+                hits = data.get("hits", []) or []
+                if not hits:
+                    break
+                all_hits.extend(hits)
+                if len(hits) < limit:
+                    break  # last page
+                page += 1
+                time.sleep(0.25)
+                continue
+
+            # Handle common transient / auth issues gracefully
+            if resp.status_code in (429, 500, 502, 503, 504):
+                time.sleep(backoff)
+                backoff = min(30.0, backoff * 1.7)
+                continue
+            else:
+                # Non-retryable
+                break
+
+        return all_hits
+
+    def _normalize_name_for_wos_comparison(self, first_name: str, last_name: str) -> str:
+        """Convert input name to WOS format: 'Last, F' or 'Last, FI' for comparison."""
+        first_clean = first_name.strip()
+        last_clean = last_name.strip()
+        
+        if not first_clean or not last_clean:
+            return f"{last_clean}, {first_clean}"
+        
+        # Create variations: "Last, F" and "Last, FI" (first + middle initial if available)
+        initials = first_clean[0].upper()
+        if len(first_clean.split()) > 1:
+            # Handle middle names/initials
+            parts = first_clean.split()
+            if len(parts[1]) == 1 or (len(parts[1]) == 2 and parts[1].endswith('.')):
+                # Already an initial
+                initials += parts[1].replace('.', '').upper()
+            else:
+                # Full middle name, take first letter
+                initials += parts[1][0].upper()
+        
+        return f"{last_clean}, {initials}"
+
+    def _matches_target_researcher(self, wos_author_name: str, target_first: str, target_last: str) -> bool:
+        """Check if WOS author name matches our target researcher using intelligent fuzzy matching."""
+        if not wos_author_name or not target_first or not target_last:
+            return False
+        
+        wos_name = wos_author_name.strip()
+        target_normalized = self._normalize_name_for_wos_comparison(target_first, target_last)
+        
+        # Direct match check
+        if wos_name.upper() == target_normalized.upper():
+            return True
+        
+        # Parse WOS name format: "Last, Initials"
+        if ',' not in wos_name:
+            return False
+        
+        wos_parts = wos_name.split(',', 1)
+        if len(wos_parts) != 2:
+            return False
+        
+        wos_last = wos_parts[0].strip()
+        wos_initials = wos_parts[1].strip().replace('.', '').replace(' ', '').upper()
+        
+        target_last_clean = target_last.strip()
+        target_first_clean = target_first.strip()
+        
+        # Last name must match closely (high threshold for last names)
+        last_name_score = fuzz.ratio(wos_last.lower(), target_last_clean.lower()) / 100.0
+        if last_name_score < 0.9:  # Very strict on last name matching
+            return False
+        
+        # Check if initials match
+        target_initials = target_first_clean[0].upper()
+        if len(target_first_clean.split()) > 1:
+            # Add middle initial if available
+            middle_part = target_first_clean.split()[1]
+            if middle_part:
+                target_initials += middle_part[0].upper()
+        
+        # Initials matching logic
+        if not wos_initials or not target_initials:
+            return last_name_score >= 0.95  # Very high bar if no initials
+        
+        # Check if WOS initials start with our target initials
+        if target_initials.startswith(wos_initials) or wos_initials.startswith(target_initials):
+            return True
+        
+        # Check if first initial matches at minimum
+        if wos_initials[0] == target_initials[0]:
+            return True
+        
+        return False
+
+    # NEW: WOS-specific confidence scoring that rewards "Last, Initial(s)" matches and minimizes affiliation reliance.
+    def _calculate_wos_confidence(
+        self,
+        wos_author_name: str,
+        target_first: str,
+        target_last: str,
+        query_aff: Optional[str],
+        rec_aff_text: Optional[str]
+    ) -> float:
+        """
+        Compute a confidence score tailored for WOS author names which use 'Last, Initials' format
+        and often lack stable profile-level affiliation. Relies primarily on:
+          - strict last-name match,
+          - initials match quality,
+          - tiny optional bump for coarse record-level affiliation overlap.
+        """
+        try:
+            # Early gate using our existing name guard
+            if not self._matches_target_researcher(wos_author_name, target_first, target_last):
+                return 0.0
+
+            # Parse WOS name format: "Last, Initials"
+            parts = wos_author_name.split(',', 1)
+            wos_last = parts[0].strip() if len(parts) == 2 else wos_author_name.strip()
+            wos_initials = parts[1].strip().replace('.', '').replace(' ', '').upper() if len(parts) == 2 else ""
+
+            tgt_first = (target_first or "").strip()
+            tgt_last = (target_last or "").strip()
+            if not tgt_last or not tgt_first:
+                return 0.0
+
+            # Last-name similarity (very strict)
+            last_sim = fuzz.ratio(wos_last.lower(), tgt_last.lower()) / 100.0
+            if last_sim < 0.9:
+                return 0.0
+
+            # Build target initials (first + optional middle)
+            t_parts = tgt_first.split()
+            target_initials = (t_parts[0][0] if t_parts and t_parts[0] else "").upper()
+            if len(t_parts) > 1 and t_parts[1]:
+                target_initials += t_parts[1][0].upper()
+
+            # Grade initials match quality
+            base = 0.0
+            if wos_initials and target_initials:
+                if wos_initials == target_initials:
+                    base = 0.92
+                elif wos_initials.startswith(target_initials) or target_initials.startswith(wos_initials):
+                    base = 0.90
+                elif wos_initials[0] == target_initials[0]:
+                    base = 0.86
+                else:
+                    base = 0.0
+            else:
+                # If initials unavailable on either side, rely on strong last name only
+                base = 0.85 if last_sim >= 0.95 else 0.82
+
+            # Tiny, optional bump for affiliation overlap (record-level, very noisy)
+            bump = 0.0
+            if query_aff and rec_aff_text:
+                aff_score = max(
+                    fuzz.partial_ratio(query_aff.lower(), rec_aff_text.lower()) / 100.0,
+                    fuzz.token_set_ratio(query_aff.lower(), rec_aff_text.lower()) / 100.0
+                )
+                if aff_score >= 0.7:
+                    bump += 0.03
+                elif aff_score >= 0.5:
+                    bump += 0.015
+
+            return min(1.0, base + bump)
+        except Exception:
+            return 0.0
+
+    # NEW: modest confidence boost based on how many documents we saw for this RID.
+    def _boost_confidence_with_count(self, conf: float, doc_count: int) -> float:
+        try:
+            import math
+            if doc_count <= 0:
+                return conf
+            # Log-scale bump up to ~0.08 for prolific presence across hits
+            bump = min(0.08, math.log10(doc_count + 1) * 0.05)
+            return min(1.0, conf + bump)
+        except Exception:
+            return conf
+
+    def _extract_candidates_from_hits(self, hits: List[dict], query_name: str, query_aff: Optional[str]) -> List[ProfileCandidate]:
+        """
+        Build candidates keyed by ResearcherID. Confidence is based on name
+        similarity (+ optional coarse affiliation signal from record-level addresses).
+        Now includes intelligent name filtering for WOS format.
+        """
+        # Parse target name for filtering
+        name_parts = query_name.split()
+        if len(name_parts) >= 2:
+            target_first = name_parts[0]
+            target_last = " ".join(name_parts[1:])
+        else:
+            target_first = query_name
+            target_last = ""
+
+        # Coarse record-level affiliation text for confidence (best-effort)
+        def record_aff_text(rec: dict) -> Optional[str]:
+            try:
+                addrs = rec.get("addresses", {})
+                orgs = []
+                # Starter responses may have "organizations" with "displayName"
+                for a in addrs.get("organizations", []) or []:
+                    dn = a.get("displayName") or a.get("name")
+                    if dn:
+                        orgs.append(dn)
+                if not orgs:
+                    # Sometimes it's nested differently
+                    for addr in addrs.get("addresses", []) or []:
+                        for org in addr.get("organizations", []) or []:
+                            dn = org.get("displayName") or org.get("name")
+                            if dn:
+                                orgs.append(dn)
+                if orgs:
+                    # join unique org names
+                    uniq = list(dict.fromkeys(orgs))
+                    return " ; ".join(uniq[:5])
+            except Exception:
+                pass
+            return None
+
+        # Aggregate per ResearcherID
+        by_rid: Dict[str, Dict] = {}
+        for rec in hits:
+            authors = (rec.get("names") or {}).get("authors") or []
+            rec_aff_text = record_aff_text(rec)
+            title = rec.get("title") or ""
+
+            for a in authors:
+                name = (a.get("wosStandard") or a.get("displayName") or "").strip()
+                rid = (a.get("researcherId") or "").strip()
+                orcid = (a.get("orcidId") or "").strip() or None
+
+                if not rid or not name:
+                    continue
+
+                # NEW: filter and score using WOS-specific confidence
+                if not self._matches_target_researcher(name, target_first, target_last):
+                    continue
+                conf = self._calculate_wos_confidence(name, target_first, target_last, query_aff, rec_aff_text)
+
+                slot = by_rid.get(rid)
+                if not slot:
+                    slot = {
+                        "rid": rid,
+                        "name": name,
+                        "best_aff": rec_aff_text,
+                        "best_conf": conf,
+                        "titles": [],
+                        "count": 0,
+                        "orcids": set(),
+                    }
+                    by_rid[rid] = slot
+
+                # Aggregate
+                slot["count"] += 1
+                if title:
+                    if len(slot["titles"]) < MAX_PUBLICATION_SAMPLES:
+                        slot["titles"].append(title)
+                if orcid:
+                    slot["orcids"].add(orcid)
+                if conf > slot["best_conf"]:
+                    slot["best_conf"] = conf
+                if not slot["best_aff"] and rec_aff_text:
+                    slot["best_aff"] = rec_aff_text
+
+        # Convert to ProfileCandidate list
+        candidates: List[ProfileCandidate] = []
+        for rid, slot in by_rid.items():
+            profile_url = f"https://www.webofscience.com/wos/author/record/{rid}"
+            # NEW: apply doc-count-based boost at the end
+            boosted_conf = self._boost_confidence_with_count(slot["best_conf"], slot["count"])
+            candidate = ProfileCandidate(
+                source="Web of Science",
+                profile_id=rid,
+                name=slot["name"],
+                affiliation=slot["best_aff"],
+                confidence_score=min(1.0, boosted_conf),
+                sample_publications=slot["titles"],
+                profile_url=profile_url,
+                verification_info={
+                    "orcid_ids": sorted(slot["orcids"]) if slot["orcids"] else None,
+                    "notes": "Discovered via Starter API documents; profile URL constructed from ResearcherID."
+                },
+                publication_count=slot["count"],
+            )
+            candidates.append(candidate)
+
+        candidates.sort(key=lambda c: (c.confidence_score, c.publication_count or 0), reverse=True)
+        return candidates
 
 # Main Service
 class ProfileDiscoveryService:
@@ -933,34 +1475,55 @@ class ProfileDiscoveryService:
     def __init__(self, api_keys: Dict[str, str] = None):
         self.api_keys = api_keys or {}
         self.sources = {}
+        self._gs_driver = None  # Store Google Scholar driver for reuse
         
         self._initialize_sources()
     
     def _initialize_sources(self):
-        """Initialize all available discovery sources."""
-        if SCRAPING_DEPS_AVAILABLE:
-            self.sources["Google Scholar"] = GoogleScholarDiscovery(self.api_keys)
-        else:
-            logger.warning("Google Scholar scraping disabled (dependencies not found).")
-        
+        """Initialize all available discovery sources in optimized order."""
+        # Reorder sources for efficiency: fast APIs first, then scraping, WOS last
         self.sources["ORCID"] = ORCIDDiscovery()
         
         if self.api_keys.get('scopus_api_key'):
             self.sources["Scopus"] = ScopusDiscovery(self.api_keys['scopus_api_key'])
         
+        if SCRAPING_DEPS_AVAILABLE:
+            self.sources["Google Scholar"] = GoogleScholarDiscovery(self.api_keys)
+        else:
+            logger.warning("Google Scholar scraping disabled (dependencies not found).")
+        
+        # Move WOS last since it often returns too many low-quality candidates
         if self.api_keys.get('wos_api_key'):
             self.sources["Web of Science"] = WOSDiscovery(self.api_keys['wos_api_key'])
     
     def discover_all_profiles(self, first_name: str, last_name: str, 
                             affiliation: str = None) -> DiscoveryResult:
-        """Discover profiles from all available sources."""
+        """Discover profiles from all available sources - always search all sources."""
         all_candidates, errors = [], []
         
         for name, service in self.sources.items():
             try:
                 candidates = service.search_profiles(first_name, last_name, affiliation)
+                
+                # Store Google Scholar driver for potential reuse
+                if name == "Google Scholar" and hasattr(service, '_last_driver'):
+                    self._gs_driver = service._last_driver
+                    service._last_driver = None  # Transfer ownership
+                
+                # Filter WOS candidates to reduce noise
+                if name == "Web of Science":
+                    # Include high-confidence OR strong last-name matches (>= 0.88)
+                    candidates = [
+                        c for c in candidates
+                        if (c.confidence_score > 0.8) or self._wos_last_name_match(c, last_name, threshold=0.88)
+                    ]
+                    # Keep top few for brevity
+                    candidates = candidates[:5]
+                    logger.info(f"Filtered to {len(candidates)} WOS candidates")
+                
                 all_candidates.extend(candidates)
                 logger.info(f"Found {len(candidates)} candidate(s) from {name}")
+                
             except Exception as e:
                 error_msg = f"{name} discovery failed: {e}"
                 logger.error(error_msg, exc_info=True)
@@ -974,37 +1537,152 @@ class ProfileDiscoveryService:
         )
     
     def verify_profile(self, candidate: ProfileCandidate, max_publications: int = 3) -> ProfileCandidate:
-        """Verify a profile by fetching sample publications."""
+        """Verify a profile by fetching sample publications, avoiding redundant API calls."""
+        max_pubs = min(MAX_PUBLICATION_SAMPLES, max(1, int(max_publications or 0)))
+        
+        # Skip verification if we already have sample publications from discovery
+        if candidate.sample_publications and len(candidate.sample_publications) >= max_pubs:
+            logger.info(f"Skipping verification for {candidate.source} {candidate.profile_id} - already has {len(candidate.sample_publications)} samples")
+            candidate.verification_info['verification_skipped'] = 'already_has_samples'
+            return candidate
+
+        # NEW: For Google Scholar, reuse the shared driver from discovery to avoid spawning a new one.
+        if candidate.source == "Google Scholar":
+            titles = self._fetch_gs_publications_via_shared_driver(candidate.profile_id, max_pubs)
+            if titles:
+                candidate.sample_publications = titles[:max_pubs]
+                candidate.verification_info['verified_at'] = time.time()
+                candidate.verification_info['sample_count'] = len(candidate.sample_publications)
+                candidate.verification_info['gs_fetch_method'] = 'shared_driver'
+            else:
+                # Do not create a new driver here; keep a note for transparency.
+                candidate.verification_info['verification_skipped'] = 'gs_shared_driver_unavailable_or_failed'
+            return candidate
+
         fetch_map = {
-            "Google Scholar": (google_scholar.fetch, {
-                'gs_id': candidate.profile_id,
-                'max_publications_detail': max_publications
-            }),
             "ORCID": (orcid.fetch, {
                 'orcid_id': candidate.profile_id,
-                'max_records': max_publications,
-                **self.api_keys
+                'max_records': max_pubs,
+                'max_results': max_pubs,
+                'limit': max_pubs,
             }),
             "Scopus": (scopus.fetch, {
-                'author_id': candidate.profile_id,
-                'max_records': max_publications,
-                **self.api_keys
+                'scopus_id': candidate.profile_id,
+                'api_key': self.api_keys.get('scopus_api_key'),
+                'page_batch': max_pubs,
             }),
         }
-        
         if candidate.source not in fetch_map:
             return candidate
 
         fetch_func, kwargs = fetch_map[candidate.source]
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
         try:
-            publications = fetch_func(**kwargs)
-            candidate.sample_publications = [pub.title for pub in publications[:max_publications]]
+            publications = self._invoke_with_supported_kwargs(fetch_func, kwargs)
+            if isinstance(publications, list):
+                pub_objs = publications[:max_pubs]
+            else:
+                pub_objs = list(itertools.islice(publications, max_pubs))
+            candidate.sample_publications = [getattr(pub, "title", str(pub)) for pub in pub_objs]
             candidate.verification_info['verified_at'] = time.time()
             candidate.verification_info['sample_count'] = len(candidate.sample_publications)
         except Exception as e:
             logger.warning(f"Profile verification failed for {candidate.source} {candidate.profile_id}: {e}")
-        
+
         return candidate
+
+    # NEW: Fetch Google Scholar publications using the shared driver from discovery
+    def _fetch_gs_publications_via_shared_driver(self, profile_id: str, max_pubs: int = 3) -> List[str]:
+        # Only proceed if Selenium stack is available and a driver is present
+        if not SCRAPING_DEPS_AVAILABLE or not self._gs_driver:
+            return []
+        driver = self._gs_driver
+        try:
+            # Simple responsiveness check
+            try:
+                _ = driver.current_url
+            except Exception:
+                return []
+
+            # Build and navigate to the author's publications list (sorted by pubdate)
+            url = f"https://scholar.google.com/citations?user={profile_id}&hl=en&view_op=list_works&sortby=pubdate"
+            if url not in (driver.current_url or ""):
+                driver.get(url)
+
+            # Quick CAPTCHA detection
+            try:
+                cur = (driver.current_url or "").lower()
+                title = (driver.title or "").lower()
+                if any(p in cur or p in title for p in ['recaptcha', '/sorry/', 'captcha', 'unusual traffic']):
+                    return []
+            except Exception:
+                pass
+
+            # Wait for publication rows to render and scrape titles
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "tr.gsc_a_tr"))
+                )
+            except Exception:
+                time.sleep(1)
+
+            elems = driver.find_elements(By.CSS_SELECTOR, "tr.gsc_a_tr .gsc_a_t a")
+            titles: List[str] = []
+            for el in elems:
+                t = (el.text or "").strip()
+                if t:
+                    titles.append(t)
+                if len(titles) >= max_pubs:
+                    break
+            return titles[:max_pubs]
+        except Exception as e:
+            logger.debug(f"GS shared driver fetch failed for {profile_id}: {e}")
+            return []
+
+    def __del__(self):
+        """Cleanup Google Scholar driver on service destruction."""
+        if self._gs_driver:
+            try:
+                self._gs_driver.quit()
+            except Exception:
+                pass
+
+    def _invoke_with_supported_kwargs(self, func, kwargs: Dict):
+        """Call func with only the kwargs it supports to avoid unexpected-kwarg errors."""
+        try:
+            sig = inspect.signature(func)
+            params = sig.parameters
+            # If function accepts **kwargs, pass everything
+            if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                return func(**kwargs)
+            allowed = {k: v for k, v in kwargs.items() if k in params}
+            return func(**allowed)
+        except (ValueError, TypeError):
+            # Fallback for callables without inspectable signature
+            return func(**kwargs)
+        
+    # NEW: helper to allow WOS last-name-based inclusion
+    def _wos_last_name_match(self, candidate: ProfileCandidate, target_last: str, threshold: float = 0.88) -> bool:
+        try:
+            if not candidate or not candidate.name or not target_last:
+                return False
+            cand_last = self._extract_last_name(candidate.name)
+            if not cand_last:
+                return False
+            sim = fuzz.ratio(cand_last.lower(), target_last.lower()) / 100.0
+            return sim >= threshold
+        except Exception:
+            return False
+
+    def _extract_last_name(self, display_name: str) -> str:
+        """Best-effort last-name extraction from 'Last, FI' or 'First Middle Last'."""
+        name = (display_name or "").strip()
+        if not name:
+            return ""
+        if ',' in name:
+            return name.split(',', 1)[0].strip()
+        parts = name.split()
+        return parts[-1].strip() if parts else ""
 
 def discover_researcher_profiles(
     first_name: str, 
@@ -1015,24 +1693,29 @@ def discover_researcher_profiles(
 ) -> DiscoveryResult:
     """
     Discover researcher profiles across all academic databases.
-    
+
     Args:
         first_name: Researcher's first name
         last_name: Researcher's last name
         affiliation: Optional institutional affiliation
         api_keys: Dictionary of API keys for various services
-        verify_profiles: Whether to fetch sample publications for verification
-    
-    Returns:
-        DiscoveryResult object containing candidates and status
+        verify_profiles: Whether to fetch sample publications for verification (up to 3)
     """
     service = ProfileDiscoveryService(api_keys)
     result = service.discover_all_profiles(first_name, last_name, affiliation)
-    
+
     if verify_profiles and result.success:
-        for i, candidate in enumerate(result.candidates[:5]):
-            result.candidates[i] = service.verify_profile(candidate)
-    
+        # Verify top candidates only, prioritizing highest confidence scores
+        # Limit to top 5 to avoid excessive verification calls
+        top_candidates = sorted(result.candidates, key=lambda x: x.confidence_score, reverse=True)[:5]
+        for i, candidate in enumerate(top_candidates):
+            # Find the original candidate in the list and update it
+            for j, orig_candidate in enumerate(result.candidates):
+                if (orig_candidate.source == candidate.source and 
+                    orig_candidate.profile_id == candidate.profile_id):
+                    result.candidates[j] = service.verify_profile(candidate, MAX_PUBLICATION_SAMPLES)
+                    break
+
     return result
 
 

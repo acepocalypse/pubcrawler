@@ -102,6 +102,59 @@
           white-space: nowrap;
           opacity: 0.9;
         }
+
+        /* === Profile Discovery (modal) redesign === */
+        .profile-modal .source-section-header {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: #f9fafb;
+        }
+        .profile-modal .candidate-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: #ffffff;
+            transition: box-shadow .15s ease, border-color .15s ease, transform .05s ease;
+        }
+        .profile-modal .candidate-card:hover {
+            box-shadow: 0 6px 20px rgba(0,0,0,.06);
+        }
+        .profile-modal .candidate-card.selected {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+            background: #f8fbff;
+        }
+        .profile-modal .meta {
+            color: #6b7280; /* gray-500 */
+            font-size: .85rem;
+        }
+        .profile-modal .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: .7rem;
+            font-weight: 600;
+        }
+        .profile-modal .sample-pubs {
+            margin-top: .5rem;
+            max-height: 84px;
+            overflow-y: auto;
+        }
+        .profile-modal .sample-pubs li {
+            color: #4b5563; /* gray-600 */
+            font-size: .85rem;
+            line-height: 1.25rem;
+            margin-bottom: .25rem;
+        }
+        .profile-modal .split {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        @media (min-width: 640px) {
+            .profile-modal .split { grid-template-columns: 1fr auto; }
+        }
     </style>
 </head>
 <body class="bg-light-bg text-gray-900 min-h-screen">
@@ -161,7 +214,7 @@
                                 <button 
                                     type="button" 
                                     id="autofill-btn"
-                                    class="bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition flex items-center"
+                                    class="bg-black text-white px-4 h-12 rounded-lg hover:bg-gray-800 transition flex items-center"
                                     title="Automatically discover profile IDs"
                                 >
                                     <i class="fas fa-magic mr-2"></i>
@@ -489,7 +542,8 @@
     <!-- Profile Discovery Modal -->
     <div id="profile-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
         <div class="flex items-center justify-center min-h-screen p-4">
-            <div class="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <!-- widened from max-w-4xl w-full to near-full viewport width with a very large cap -->
+            <div class="bg-white rounded-xl w-[95vw] max-w-[100rem] max-h-[90vh] overflow-hidden">
                 <!-- Modal Header -->
                 <div class="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <h3 class="text-lg font-medium text-gray-900">
@@ -502,7 +556,7 @@
                 </div>
                 
                 <!-- Modal Content -->
-                <div class="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                <div class="p-6 overflow-y-auto max-h-[calc(90vh-120px)] profile-modal">
                     <div id="discovery-results">
                         <!-- Results will be populated here -->
                     </div>
@@ -552,7 +606,7 @@
                         </ul>
                     </div>
                     <div>
-                        <h4 class="text-sm font-semibold mb-3">Our Group</h4>
+                        <h4 class="text-sm font-semibold mb-3">Our Team</h4>
                         <ul class="space-y-2 text-sm">
                             <li><a href="#" class="text-gray-600 hover:text-gray-900">About</a></li>
                             <li><a href="#" class="text-gray-600 hover:text-gray-900">Blog</a></li>
@@ -789,9 +843,22 @@
             errorMessage.classList.add('hidden');
         }
 
+        // New: conservative name formatter to fix missing spaces around initials (e.g., "MorganE.Furze" -> "Morgan E. Furze")
+        function formatName(name) {
+            if (!name) return '';
+            let s = String(name).trim();
+            // Add space before an initial stuck to the previous token (e.g., "nE." -> "n E.")
+            s = s.replace(/([a-z])([A-Z]\.)/g, '$1 $2');
+            // Add space after a period if followed by an uppercase letter (e.g., "E.Furze" -> "E. Furze")
+            s = s.replace(/\.(?=[A-Z])/g, '. ');
+            // Collapse multiple spaces
+            s = s.replace(/\s{2,}/g, ' ');
+            return s;
+        }
+
         function displayResults(data) {
             // Update header information
-            document.getElementById('researcher-display-name').textContent = data.researcher.name;
+            document.getElementById('researcher-display-name').textContent = formatName(data.researcher.name);
             
             let infoText = '';
             if (data.researcher.affiliation) {
@@ -1263,17 +1330,15 @@
             
             if (!discoveryResult.candidates || discoveryResult.candidates.length === 0) {
                 discoveryResults.innerHTML = `
-                    <div class="text-center py-8">
-                        <i class="fas fa-search text-gray-400 text-4xl mb-4"></i>
-                        <h3 class="text-lg font-medium text-gray-900 mb-2">No Profiles Found</h3>
-                        <p class="text-gray-600">
+                    <div class="text-center py-10">
+                        <i class="fas fa-search text-gray-400 text-4xl mb-3"></i>
+                        <h3 class="text-lg font-medium text-gray-900 mb-1">No Profiles Found</h3>
+                        <p class="text-gray-600 text-sm">
                             We couldn't find any matching profiles for "${discoveryResult.query.first_name} ${discoveryResult.query.last_name}".
-                            Try checking the spelling or using a different name format.
                         </p>
                     </div>
                 `;
             } else {
-                // Group candidates by normalized source key
                 const normalizeKey = (src) => {
                     const s = (src || '').toLowerCase();
                     if (s.includes('google')) return 'google_scholar';
@@ -1290,31 +1355,23 @@
                     orcid:          { label: 'ORCID',          icon: 'fab fa-orcid',   color: '#a5cd3b' }
                 };
 
-                const groups = {
-                    google_scholar: [],
-                    scopus: [],
-                    wos: [],
-                    orcid: []
-                };
-
-                // Preserve original indices for event binding
+                const groups = { google_scholar: [], scopus: [], wos: [], orcid: [] };
                 discoveryResult.candidates.forEach((c, idx) => {
                     const k = normalizeKey(c.source);
                     if (groups[k]) groups[k].push({ candidate: c, gindex: idx });
                 });
 
-                const sectionHtml = (key) => {
+                const section = (key) => {
                     const m = meta[key];
                     const items = groups[key];
                     const content = items.length
                         ? items.map(({ candidate, gindex }) => createCandidateCard(candidate, gindex)).join('')
                         : `<div class="text-sm text-gray-500 italic px-1">No ${m.label} profiles found</div>`;
-
                     return `
-                        <section class="border border-gray-200 rounded-lg">
-                            <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                                <div class="flex items-center space-x-2">
-                                    <span class="w-6 h-6 rounded-full flex items-center justify-center" style="background-color:${m.color}">
+                        <section class="border border-gray-200 rounded-xl overflow-hidden">
+                            <div class="source-section-header px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-7 h-7 rounded-full flex items-center justify-center" style="background-color:${m.color}">
                                         <i class="${m.icon} text-white text-xs"></i>
                                     </span>
                                     <h5 class="font-medium text-gray-900">${m.label}</h5>
@@ -1330,23 +1387,32 @@
 
                 discoveryResults.innerHTML = `
                     <div class="mb-4">
-                        <h4 class="text-lg font-medium text-gray-900 mb-2">
-                            Found ${discoveryResult.candidates.length} potential profiles for 
-                            "${discoveryResult.query.first_name} ${discoveryResult.query.last_name}"
-                        </h4>
-                        <p class="text-gray-600 text-sm">
-                            Review the profiles by source below and select the ones that match your researcher.
-                        </p>
+                        <div class="split">
+                            <div>
+                                <h4 class="text-lg font-medium text-gray-900">
+                                    ${discoveryResult.candidates.length} potential profiles for
+                                    "${discoveryResult.query.first_name} ${discoveryResult.query.last_name}"
+                                </h4>
+                                <p class="text-gray-600 text-sm mt-1">
+                                    Review each source below and select profiles that match your researcher.
+                                </p>
+                            </div>
+                            <div class="hidden sm:flex items-center justify-end gap-2">
+                                <span class="badge" style="background:#dcfce7;color:#166534">High match</span>
+                                <span class="badge" style="background:#fef9c3;color:#854d0e">Medium</span>
+                                <span class="badge" style="background:#fee2e2;color:#991b1b">Low</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        ${sectionHtml('google_scholar')}
-                        ${sectionHtml('scopus')}
-                        ${sectionHtml('wos')}
-                        ${sectionHtml('orcid')}
+                        ${section('google_scholar')}
+                        ${section('scopus')}
+                        ${section('wos')}
+                        ${section('orcid')}
                     </div>
                 `;
 
-                // Bind checkbox change handlers using global indices
+                // Checkbox handlers + card selection highlight
                 discoveryResults.querySelectorAll('.candidate-select').forEach(cb => {
                     cb.addEventListener('change', (e) => {
                         const gindex = parseInt(e.target.dataset.gindex, 10);
@@ -1359,6 +1425,10 @@
                         } else {
                             delete selectedProfiles[candidate.source];
                         }
+
+                        const card = e.target.closest('.candidate-card');
+                        if (card) card.classList.toggle('selected', e.target.checked);
+
                         updateApplyButtonState();
                     });
                 });
@@ -1369,60 +1439,84 @@
         }
 
         function createCandidateCard(candidate, index) {
-            const confidenceColor = candidate.confidence_score >= 0.8 ? 'green' : 
-                                   candidate.confidence_score >= 0.6 ? 'yellow' : 'red';
-            const confidenceText = candidate.confidence_score >= 0.8 ? 'High' :
-                                  candidate.confidence_score >= 0.6 ? 'Medium' : 'Low';
-            
-            const samplePubs = candidate.sample_publications && candidate.sample_publications.length > 0 
-                ? candidate.sample_publications.slice(0, 2).map(pub => `<li class="text-sm text-gray-600">• ${pub}</li>`).join('')
-                : '<li class="text-sm text-gray-500 italic">No sample publications available</li>';
-            
+            const conf = candidate.confidence_score || 0;
+            const confMeta = conf >= 0.8
+                ? { bg: '#dcfce7', fg: '#166534', label: `High • ${(conf*100).toFixed(0)}%` }
+                : conf >= 0.6
+                    ? { bg: '#fef9c3', fg: '#854d0e', label: `Medium • ${(conf*100).toFixed(0)}%` }
+                    : { bg: '#fee2e2', fg: '#991b1b', label: `Low • ${(conf*100).toFixed(0)}%` };
+
+            // Source meta from source string
+            const s = (candidate.source || '').toLowerCase();
+            const meta =
+                s.includes('google') ? { label: 'Google Scholar', icon: 'fab fa-google', color: '#4286f5' } :
+                s.includes('scopus') ? { label: 'Scopus',         icon: 'fas fa-database', color: '#eb6601' } :
+                (s.includes('web of science') || s === 'wos') ? { label: 'Web of Science', icon: 'fas fa-globe',    color: '#5e33c0' } :
+                s.includes('orcid') ? { label: 'ORCID',          icon: 'fab fa-orcid',   color: '#a5cd3b' } :
+                { label: candidate.source || 'Source', icon: 'fas fa-database', color: '#6b7280' };
+
+            const docCount = candidate.verification_info && candidate.verification_info.document_count
+                ? `<span class="ml-2">• Publications: ${candidate.verification_info.document_count}</span>`
+                : '';
+
+            // New: robust publication count from multiple possible fields
+            const pubCountRaw =
+                (candidate.publication_count != null ? candidate.publication_count : null) ??
+                (candidate.verification_info && candidate.verification_info.publication_count != null
+                    ? candidate.verification_info.publication_count
+                    : null) ??
+                (candidate.verification_info && candidate.verification_info.document_count != null
+                    ? candidate.verification_info.document_count
+                    : null);
+
+            const pubCountIsMin = !!(candidate.verification_info && candidate.verification_info.publication_count_is_min);
+            const pubCount = (pubCountRaw != null && !isNaN(pubCountRaw)) ? Number(pubCountRaw) : null;
+            const pubMeta = (pubCount != null)
+                ? `<span class="ml-2">• Publications: ${pubCount}${pubCountIsMin ? '+' : ''}</span>`
+                : '';
+
+            const samplePubs = candidate.sample_publications && candidate.sample_publications.length > 0
+                ? candidate.sample_publications.slice(0, 2).map(p => `<li>• ${p}</li>`).join('')
+                : '<li class="italic text-gray-500">No sample publications available</li>';
+
             return `
-                <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-                    <div class="flex items-start space-x-3">
-                        <input 
-                            type="checkbox" 
-                            id="candidate-${index}" 
-                            class="candidate-select mt-1 h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                            data-gindex="${index}"
-                        >
-                        <div class="flex-1">
-                            <div class="flex items-center justify-between mb-2">
-                                <div class="flex items-center space-x-2">
-                                    <span class="font-medium text-gray-900">${candidate.name}</span>
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                        ${candidate.source}
-                                    </span>
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${confidenceColor}-100 text-${confidenceColor}-800">
-                                        ${confidenceText} Match (${(candidate.confidence_score * 100).toFixed(0)}%)
-                                    </span>
-                                </div>
-                                ${candidate.profile_url ? `<a href="${candidate.profile_url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm"><i class="fas fa-external-link-alt"></i></a>` : ''}
+                <div class="candidate-card p-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex items-start gap-3">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0" style="background:${meta.color}">
+                                <i class="${meta.icon} text-sm"></i>
                             </div>
-                            
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                <div>
-                                    <p class="text-gray-600">
-                                        <strong>ID:</strong> ${candidate.profile_id}
-                                    </p>
-                                    ${candidate.affiliation ? `<p class="text-gray-600"><strong>Affiliation:</strong> ${candidate.affiliation}</p>` : ''}
-                                    ${candidate.verification_info && candidate.verification_info.document_count ? 
-                                        `<p class="text-gray-600"><strong>Publications:</strong> ${candidate.verification_info.document_count}</p>` : ''}
+                            <div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="font-medium text-gray-900">${formatName(candidate.name)}</span>
+                                    <span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">${meta.label}</span>
+                                    <span class="badge" style="background:${confMeta.bg};color:${confMeta.fg}">${confMeta.label}</span>
                                 </div>
-                                <div>
-                                    <p class="text-gray-700 font-medium mb-1">Sample Publications:</p>
-                                    <ul class="max-h-20 overflow-y-auto">
-                                        ${samplePubs}
-                                    </ul>
+                                ${candidate.affiliation ? `<div class="meta mt-1">${candidate.affiliation}</div>` : ''}
+                                <div class="meta mt-1">
+                                    <span><strong>ID:</strong> ${candidate.profile_id}</span>${pubMeta}
                                 </div>
                             </div>
                         </div>
+                        <div class="flex items-center gap-3">
+                            ${candidate.profile_url ? `<a href="${candidate.profile_url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm" title="Open profile"><i class="fas fa-external-link-alt"></i></a>` : ''}
+                            <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
+                                <input 
+                                    type="checkbox"
+                                    class="candidate-select h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                    data-gindex="${index}"
+                                >
+                                <span>Select</span>
+                            </label>
+                        </div>
                     </div>
+                    <ul class="sample-pubs">
+                        ${samplePubs}
+                    </ul>
                 </div>
             `;
         }
-        
+
         function updateApplyButtonState() {
             const hasSelections = Object.keys(selectedProfiles).length > 0;
             applySelection.disabled = !hasSelections;
@@ -1430,7 +1524,7 @@
                 ? 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700'
                 : 'px-4 py-2 bg-gray-300 text-gray-500 rounded-lg cursor-not-allowed';
         }
-        
+
         function closeProfileModal() {
             profileModal.classList.add('hidden');
             selectedProfiles = {};
@@ -1509,7 +1603,7 @@
         }
 
         function updateSourceToggleVisual(el, state) {
-            const key = el.dataset.source;
+                                             const key = el.dataset.source;
             const iconWrap = el.querySelector('.icon-wrap');
             const banIcon = el.querySelector('.ban-icon');
             const colors = { google_scholar: '#4286f5', scopus: '#eb6601', wos: '#5e33c0', orcid: '#a5cd3b' };

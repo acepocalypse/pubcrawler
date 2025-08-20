@@ -88,7 +88,7 @@ if not exist "venv" (
 )
 
 REM Start the web server
-echo ✅ Your network URL is: http://10.165.41.221:52123
+echo ✅ Your network URL is: http://10.165.41.221:52221
 echo.
 echo 💡 Tips:
 echo    • Share the network URL above with your coworkers
@@ -96,6 +96,6 @@ echo    • Use Ctrl+C to stop the server
 echo    • Check WEB_README.md for more information
 echo.
 
-%PYTHON_CMD% run_web.py --host 0.0.0.0 --port 52222 --debug
+%PYTHON_CMD% run_web.py --host 0.0.0.0 --port 52221 --debug
 
 pause

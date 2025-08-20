@@ -217,6 +217,9 @@ chromedriver*
 scholar_data/
 temp_profiles/
 
+# Chrome discovery profile directory
+.chrome-discovery-profile/
+
 # Test files and temporary files
 test_*.py
 *test*.py
