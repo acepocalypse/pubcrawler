@@ -157,6 +157,18 @@
                                     class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-transparent"
                                 >
                             </div>
+                            <div class="flex items-end">
+                                <button 
+                                    type="button" 
+                                    id="autofill-btn"
+                                    class="bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition flex items-center"
+                                    title="Automatically discover profile IDs"
+                                >
+                                    <i class="fas fa-magic mr-2"></i>
+                                    <span id="autofill-btn-text">Autofill IDs</span>
+                                    <div id="autofill-spinner" class="spinner ml-2 hidden"></div>
+                                </button>
+                            </div>
                         </div>
                         
                         <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -474,6 +486,46 @@
         </section>
     </main>
 
+    <!-- Profile Discovery Modal -->
+    <div id="profile-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+                <!-- Modal Header -->
+                <div class="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                    <h3 class="text-lg font-medium text-gray-900">
+                        <i class="fas fa-magic mr-2 text-blue-600"></i>
+                        Discovered Profiles
+                    </h3>
+                    <button id="close-modal" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <!-- Modal Content -->
+                <div class="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                    <div id="discovery-results">
+                        <!-- Results will be populated here -->
+                    </div>
+                </div>
+                
+                <!-- Modal Footer -->
+                <div class="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-between items-center">
+                    <div class="text-sm text-gray-600">
+                        Select the profiles that match your researcher
+                    </div>
+                    <div class="flex space-x-3">
+                        <button id="cancel-selection" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                            Cancel
+                        </button>
+                        <button id="apply-selection" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            Apply Selected IDs
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="bg-white border-t border-gray-200 mt-12">
         <div class="container mx-auto px-4 py-8">
@@ -535,6 +587,8 @@
         let currentSearchResults = null;
         let originalPublications = [];
         let filteredPublications = [];
+        let discoveredProfiles = null;
+        let selectedProfiles = {};
 
         // DOM elements
         const searchForm = document.getElementById('search-form');
@@ -547,6 +601,16 @@
         const apiKeysToggle = document.getElementById('api-keys-toggle');
         const apiKeysSection = document.getElementById('api-keys-section');
         const apiKeysChevron = document.getElementById('api-keys-chevron');
+        
+        // Autofill elements
+        const autofillBtn = document.getElementById('autofill-btn');
+        const autofillBtnText = document.getElementById('autofill-btn-text');
+        const autofillSpinner = document.getElementById('autofill-spinner');
+        const profileModal = document.getElementById('profile-modal');
+        const closeModal = document.getElementById('close-modal');
+        const cancelSelection = document.getElementById('cancel-selection');
+        const applySelection = document.getElementById('apply-selection');
+        const discoveryResults = document.getElementById('discovery-results');
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
@@ -559,6 +623,19 @@
 
             // API keys toggle
             apiKeysToggle.addEventListener('click', toggleApiKeysSection);
+
+            // Autofill functionality
+            autofillBtn.addEventListener('click', handleAutofill);
+            closeModal.addEventListener('click', closeProfileModal);
+            cancelSelection.addEventListener('click', closeProfileModal);
+            applySelection.addEventListener('click', applySelectedProfiles);
+            
+            // Close modal when clicking outside
+            profileModal.addEventListener('click', (e) => {
+                if (e.target === profileModal) {
+                    closeProfileModal();
+                }
+            });
 
             // Live filter event listeners  
             document.getElementById('search-filter').addEventListener('input', applyFilters);
@@ -1106,6 +1183,310 @@
 
         function showSettings() {
             alert('Settings panel coming soon!');
+        }
+
+        // Profile Discovery Functions
+        async function handleAutofill() {
+            const researcherName = document.getElementById('researcher-name').value.trim();
+            const affiliation = document.getElementById('affiliation').value.trim();
+            
+            if (!researcherName) {
+                showError('Please enter a researcher name before using autofill');
+                return;
+            }
+            
+            // Parse name
+            const nameParts = researcherName.split(' ');
+            if (nameParts.length < 2) {
+                showError('Please provide both first and last name for autofill');
+                return;
+            }
+            
+            const firstName = nameParts[0];
+            const lastName = nameParts.slice(1).join(' ');
+            
+            setAutofillLoading(true);
+            hideError();
+            
+            try {
+                const requestData = {
+                    first_name: firstName,
+                    last_name: lastName,
+                    affiliation: affiliation,
+                    api_keys: {
+                        scopus_api_key: document.getElementById('scopus-api-key').value.trim(),
+                        wos_api_key: document.getElementById('wos-api-key').value.trim(),
+                        orcid_client_id: document.getElementById('orcid-client-id').value.trim(),
+                        orcid_client_secret: document.getElementById('orcid-client-secret').value.trim()
+                    }
+                };
+                
+                const response = await fetch('/api/discover-profiles', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || 'Profile discovery failed');
+                }
+                
+                discoveredProfiles = result;
+                showProfileModal(result);
+                
+            } catch (error) {
+                console.error('Profile discovery error:', error);
+                showError(error.message || 'Failed to discover profiles');
+            } finally {
+                setAutofillLoading(false);
+            }
+        }
+        
+        function setAutofillLoading(loading) {
+            if (loading) {
+                autofillBtn.disabled = true;
+                autofillBtnText.textContent = 'Discovering...';
+                autofillSpinner.classList.remove('hidden');
+            } else {
+                autofillBtn.disabled = false;
+                autofillBtnText.textContent = 'Autofill IDs';
+                autofillSpinner.classList.add('hidden');
+            }
+        }
+        
+        function showProfileModal(discoveryResult) {
+            selectedProfiles = {}; // Reset selections
+            
+            if (!discoveryResult.candidates || discoveryResult.candidates.length === 0) {
+                discoveryResults.innerHTML = `
+                    <div class="text-center py-8">
+                        <i class="fas fa-search text-gray-400 text-4xl mb-4"></i>
+                        <h3 class="text-lg font-medium text-gray-900 mb-2">No Profiles Found</h3>
+                        <p class="text-gray-600">
+                            We couldn't find any matching profiles for "${discoveryResult.query.first_name} ${discoveryResult.query.last_name}".
+                            Try checking the spelling or using a different name format.
+                        </p>
+                    </div>
+                `;
+            } else {
+                // Group candidates by normalized source key
+                const normalizeKey = (src) => {
+                    const s = (src || '').toLowerCase();
+                    if (s.includes('google')) return 'google_scholar';
+                    if (s.includes('scopus')) return 'scopus';
+                    if (s.includes('web of science') || s === 'wos') return 'wos';
+                    if (s.includes('orcid')) return 'orcid';
+                    return 'other';
+                };
+
+                const meta = {
+                    google_scholar: { label: 'Google Scholar', icon: 'fab fa-google', color: '#4286f5' },
+                    scopus:         { label: 'Scopus',         icon: 'fas fa-database', color: '#eb6601' },
+                    wos:            { label: 'Web of Science', icon: 'fas fa-globe',    color: '#5e33c0' },
+                    orcid:          { label: 'ORCID',          icon: 'fab fa-orcid',   color: '#a5cd3b' }
+                };
+
+                const groups = {
+                    google_scholar: [],
+                    scopus: [],
+                    wos: [],
+                    orcid: []
+                };
+
+                // Preserve original indices for event binding
+                discoveryResult.candidates.forEach((c, idx) => {
+                    const k = normalizeKey(c.source);
+                    if (groups[k]) groups[k].push({ candidate: c, gindex: idx });
+                });
+
+                const sectionHtml = (key) => {
+                    const m = meta[key];
+                    const items = groups[key];
+                    const content = items.length
+                        ? items.map(({ candidate, gindex }) => createCandidateCard(candidate, gindex)).join('')
+                        : `<div class="text-sm text-gray-500 italic px-1">No ${m.label} profiles found</div>`;
+
+                    return `
+                        <section class="border border-gray-200 rounded-lg">
+                            <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <span class="w-6 h-6 rounded-full flex items-center justify-center" style="background-color:${m.color}">
+                                        <i class="${m.icon} text-white text-xs"></i>
+                                    </span>
+                                    <h5 class="font-medium text-gray-900">${m.label}</h5>
+                                </div>
+                                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">${items.length}</span>
+                            </div>
+                            <div class="p-3 space-y-3">
+                                ${content}
+                            </div>
+                        </section>
+                    `;
+                };
+
+                discoveryResults.innerHTML = `
+                    <div class="mb-4">
+                        <h4 class="text-lg font-medium text-gray-900 mb-2">
+                            Found ${discoveryResult.candidates.length} potential profiles for 
+                            "${discoveryResult.query.first_name} ${discoveryResult.query.last_name}"
+                        </h4>
+                        <p class="text-gray-600 text-sm">
+                            Review the profiles by source below and select the ones that match your researcher.
+                        </p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${sectionHtml('google_scholar')}
+                        ${sectionHtml('scopus')}
+                        ${sectionHtml('wos')}
+                        ${sectionHtml('orcid')}
+                    </div>
+                `;
+
+                // Bind checkbox change handlers using global indices
+                discoveryResults.querySelectorAll('.candidate-select').forEach(cb => {
+                    cb.addEventListener('change', (e) => {
+                        const gindex = parseInt(e.target.dataset.gindex, 10);
+                        if (isNaN(gindex)) return;
+                        const candidate = discoveryResult.candidates[gindex];
+                        if (!candidate) return;
+
+                        if (e.target.checked) {
+                            selectedProfiles[candidate.source] = candidate; // one selection per source
+                        } else {
+                            delete selectedProfiles[candidate.source];
+                        }
+                        updateApplyButtonState();
+                    });
+                });
+            }
+            
+            profileModal.classList.remove('hidden');
+            updateApplyButtonState();
+        }
+
+        function createCandidateCard(candidate, index) {
+            const confidenceColor = candidate.confidence_score >= 0.8 ? 'green' : 
+                                   candidate.confidence_score >= 0.6 ? 'yellow' : 'red';
+            const confidenceText = candidate.confidence_score >= 0.8 ? 'High' :
+                                  candidate.confidence_score >= 0.6 ? 'Medium' : 'Low';
+            
+            const samplePubs = candidate.sample_publications && candidate.sample_publications.length > 0 
+                ? candidate.sample_publications.slice(0, 2).map(pub => `<li class="text-sm text-gray-600">• ${pub}</li>`).join('')
+                : '<li class="text-sm text-gray-500 italic">No sample publications available</li>';
+            
+            return `
+                <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+                    <div class="flex items-start space-x-3">
+                        <input 
+                            type="checkbox" 
+                            id="candidate-${index}" 
+                            class="candidate-select mt-1 h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            data-gindex="${index}"
+                        >
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center space-x-2">
+                                    <span class="font-medium text-gray-900">${candidate.name}</span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        ${candidate.source}
+                                    </span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${confidenceColor}-100 text-${confidenceColor}-800">
+                                        ${confidenceText} Match (${(candidate.confidence_score * 100).toFixed(0)}%)
+                                    </span>
+                                </div>
+                                ${candidate.profile_url ? `<a href="${candidate.profile_url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm"><i class="fas fa-external-link-alt"></i></a>` : ''}
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                <div>
+                                    <p class="text-gray-600">
+                                        <strong>ID:</strong> ${candidate.profile_id}
+                                    </p>
+                                    ${candidate.affiliation ? `<p class="text-gray-600"><strong>Affiliation:</strong> ${candidate.affiliation}</p>` : ''}
+                                    ${candidate.verification_info && candidate.verification_info.document_count ? 
+                                        `<p class="text-gray-600"><strong>Publications:</strong> ${candidate.verification_info.document_count}</p>` : ''}
+                                </div>
+                                <div>
+                                    <p class="text-gray-700 font-medium mb-1">Sample Publications:</p>
+                                    <ul class="max-h-20 overflow-y-auto">
+                                        ${samplePubs}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function updateApplyButtonState() {
+            const hasSelections = Object.keys(selectedProfiles).length > 0;
+            applySelection.disabled = !hasSelections;
+            applySelection.className = hasSelections 
+                ? 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700'
+                : 'px-4 py-2 bg-gray-300 text-gray-500 rounded-lg cursor-not-allowed';
+        }
+        
+        function closeProfileModal() {
+            profileModal.classList.add('hidden');
+            selectedProfiles = {};
+        }
+        
+        function applySelectedProfiles() {
+            if (Object.keys(selectedProfiles).length === 0) {
+                return;
+            }
+            
+            // Apply selected IDs to the form
+            Object.values(selectedProfiles).forEach(profile => {
+                switch (profile.source) {
+                    case 'Google Scholar':
+                        document.getElementById('google-scholar-id').value = profile.profile_id;
+                        break;
+                    case 'ORCID':
+                        document.getElementById('orcid-id').value = profile.profile_id;
+                        break;
+                    case 'Scopus':
+                        document.getElementById('scopus-id').value = profile.profile_id;
+                        break;
+                    case 'Web of Science':
+                        document.getElementById('wos-id').value = profile.profile_id;
+                        break;
+                }
+            });
+            
+            // Show success message
+            const sources = Object.values(selectedProfiles).map(p => p.source).join(', ');
+            showSuccess(`Successfully applied IDs for: ${sources}`);
+            
+            closeProfileModal();
+        }
+        
+        function showSuccess(message) {
+            // Create a temporary success message
+            const successDiv = document.createElement('div');
+            successDiv.className = 'fixed top-4 right-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded z-50';
+            successDiv.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas fa-check-circle mr-2"></i>
+                    <span>${message}</span>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-4 text-green-700 hover:text-green-900">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(successDiv);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (successDiv.parentElement) {
+                    successDiv.remove();
+                }
+            }, 5000);
         }
 
         // New: setup icon toggles and visuals

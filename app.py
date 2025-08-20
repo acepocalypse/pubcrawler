@@ -33,6 +33,7 @@ from aggregate import aggregate_publications, _publications_match, _normalize_te
 from models import Author, Publication
 from coverage import analyze_publication_coverage
 from config_keys import get_api_keys
+from profile_discovery import discover_researcher_profiles, ProfileCandidate
 from rapidfuzz import fuzz
 
 
@@ -55,6 +56,108 @@ def test_matching_page():
     # Serve the test HTML file
     with open('test_matching.html', 'r', encoding='utf-8') as f:
         return f.read()
+
+
+@app.route('/api/discover-profiles', methods=['POST'])
+def api_discover_profiles():
+    """
+    API endpoint to discover researcher profiles across academic databases.
+    
+    Expected JSON payload:
+    {
+        "first_name": "John",
+        "last_name": "Doe", 
+        "affiliation": "University Name",
+        "api_keys": {
+            "scopus_api_key": "optional",
+            "wos_api_key": "optional",
+            "orcid_client_id": "optional",
+            "orcid_client_secret": "optional"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            raise BadRequest("No JSON data provided")
+        
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        affiliation = data.get('affiliation', '').strip()
+        
+        if not first_name or not last_name:
+            return jsonify({'error': 'Both first name and last name are required'}), 400
+        
+        # Get API keys
+        api_keys = data.get('api_keys', {})
+        default_keys = get_api_keys()
+        
+        # Merge user-provided with defaults
+        clean_api_keys = {
+            'scopus_api_key': api_keys.get('scopus_api_key', '').strip() or default_keys.get('scopus_api_key'),
+            'wos_api_key': api_keys.get('wos_api_key', '').strip() or default_keys.get('wos_api_key'),
+            'orcid_client_id': api_keys.get('orcid_client_id', '').strip() or default_keys.get('orcid_client_id'),
+            'orcid_client_secret': api_keys.get('orcid_client_secret', '').strip() or default_keys.get('orcid_client_secret')
+        }
+        
+        print(f"🔍 Discovering profiles for {first_name} {last_name}")
+        if affiliation:
+            print(f"   Affiliation: {affiliation}")
+        
+        # Discover profiles
+        discovery_result = discover_researcher_profiles(
+            first_name=first_name,
+            last_name=last_name,
+            affiliation=affiliation or None,
+            api_keys=clean_api_keys,
+            verify_profiles=True  # Verify with sample publications
+        )
+        
+        if not discovery_result.success:
+            return jsonify({
+                'error': discovery_result.error or 'Profile discovery failed',
+                'success': False
+            }), 500
+        
+        # Format candidates for response
+        candidates = []
+        for candidate in discovery_result.candidates:
+            candidate_data = {
+                'source': candidate.source,
+                'profile_id': candidate.profile_id,
+                'name': candidate.name,
+                'affiliation': candidate.affiliation,
+                'confidence_score': round(candidate.confidence_score, 3),
+                'profile_url': candidate.profile_url,
+                'sample_publications': candidate.sample_publications[:3],  # Limit to 3
+                'verification_info': candidate.verification_info
+            }
+            candidates.append(candidate_data)
+        
+        response = {
+            'success': True,
+            'query': {
+                'first_name': first_name,
+                'last_name': last_name,
+                'affiliation': affiliation
+            },
+            'candidates': candidates,
+            'summary': {
+                'total_candidates': len(candidates),
+                'sources_searched': list(set(c['source'] for c in candidates)),
+                'top_confidence': candidates[0]['confidence_score'] if candidates else 0
+            }
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Profile discovery error: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({
+            'error': f'Profile discovery failed: {str(e)}',
+            'success': False
+        }), 500
 
 
 @app.route('/api/search', methods=['POST'])

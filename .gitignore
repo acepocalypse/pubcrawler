@@ -226,3 +226,109 @@ temp_*.py
 *.tmp
 *.bak
 *~
+.chrome-discovery-profile/first_party_sets.db
+.chrome-discovery-profile/first_party_sets.db-journal
+.chrome-discovery-profile/lockfile
+.chrome-discovery-profile/Default/Account Web Data
+.chrome-discovery-profile/Default/Affiliation Database
+.chrome-discovery-profile/Default/BrowsingTopicsSiteData
+.chrome-discovery-profile/Default/DIPS
+.chrome-discovery-profile/Default/DIPS-wal
+.chrome-discovery-profile/Default/Favicons
+.chrome-discovery-profile/Default/heavy_ad_intervention_opt_out.db
+.chrome-discovery-profile/Default/History
+.chrome-discovery-profile/Default/History-journal
+.chrome-discovery-profile/Default/Login Data
+.chrome-discovery-profile/Default/Login Data For Account
+.chrome-discovery-profile/Default/Network Action Predictor
+.chrome-discovery-profile/Default/ServerCertificate
+.chrome-discovery-profile/Default/SharedStorage
+.chrome-discovery-profile/Default/SharedStorage-wal
+.chrome-discovery-profile/Default/Shortcuts
+.chrome-discovery-profile/Default/Top Sites
+.chrome-discovery-profile/Default/Web Data
+.chrome-discovery-profile/Default/Web Data-journal
+.chrome-discovery-profile/Default/Cache/Cache_Data/data_0
+.chrome-discovery-profile/Default/Cache/Cache_Data/data_1
+.chrome-discovery-profile/Default/Cache/Cache_Data/data_2
+.chrome-discovery-profile/Default/Cache/Cache_Data/data_3
+.chrome-discovery-profile/Default/Cache/Cache_Data/index
+.chrome-discovery-profile/Default/DawnGraphiteCache/data_0
+.chrome-discovery-profile/Default/DawnGraphiteCache/data_1
+.chrome-discovery-profile/Default/DawnGraphiteCache/data_2
+.chrome-discovery-profile/Default/DawnGraphiteCache/data_3
+.chrome-discovery-profile/Default/DawnGraphiteCache/index
+.chrome-discovery-profile/Default/DawnWebGPUCache/data_0
+.chrome-discovery-profile/Default/DawnWebGPUCache/data_1
+.chrome-discovery-profile/Default/DawnWebGPUCache/data_2
+.chrome-discovery-profile/Default/DawnWebGPUCache/data_3
+.chrome-discovery-profile/Default/DawnWebGPUCache/index
+.chrome-discovery-profile/Default/Extension State/LOCK
+.chrome-discovery-profile/Default/Extension State/LOG
+.chrome-discovery-profile/Default/Extension State/MANIFEST-000001
+.chrome-discovery-profile/Default/GCM Store/LOCK
+.chrome-discovery-profile/Default/GCM Store/LOG
+.chrome-discovery-profile/Default/GCM Store/MANIFEST-000001
+.chrome-discovery-profile/Default/GCM Store/Encryption/LOCK
+.chrome-discovery-profile/Default/GCM Store/Encryption/LOG
+.chrome-discovery-profile/Default/GCM Store/Encryption/MANIFEST-000001
+.chrome-discovery-profile/Default/GPUCache/data_0
+.chrome-discovery-profile/Default/GPUCache/data_1
+.chrome-discovery-profile/Default/GPUCache/data_2
+.chrome-discovery-profile/Default/GPUCache/data_3
+.chrome-discovery-profile/Default/GPUCache/index
+.chrome-discovery-profile/Default/Local Storage/leveldb/LOCK
+.chrome-discovery-profile/Default/Local Storage/leveldb/LOG
+.chrome-discovery-profile/Default/Local Storage/leveldb/MANIFEST-000001
+.chrome-discovery-profile/Default/Session Storage/LOCK
+.chrome-discovery-profile/Default/Session Storage/LOG
+.chrome-discovery-profile/Default/Session Storage/MANIFEST-000001
+.chrome-discovery-profile/Default/Sessions/Tabs_13400100930778723
+.chrome-discovery-profile/Default/shared_proto_db/LOCK
+.chrome-discovery-profile/Default/shared_proto_db/LOG
+.chrome-discovery-profile/Default/shared_proto_db/MANIFEST-000001
+.chrome-discovery-profile/Default/shared_proto_db/metadata/LOCK
+.chrome-discovery-profile/Default/shared_proto_db/metadata/LOG
+.chrome-discovery-profile/Default/shared_proto_db/metadata/MANIFEST-000001
+.chrome-discovery-profile/Default/Site Characteristics Database/LOCK
+.chrome-discovery-profile/Default/Site Characteristics Database/LOG
+.chrome-discovery-profile/Default/Site Characteristics Database/MANIFEST-000001
+.chrome-discovery-profile/Default/Sync Data/LevelDB/LOCK
+.chrome-discovery-profile/Default/Sync Data/LevelDB/LOG
+.chrome-discovery-profile/Default/Sync Data/LevelDB/MANIFEST-000001
+.chrome-discovery-profile/Default/WebStorage/QuotaManager
+.chrome-discovery-profile/GraphiteDawnCache/data_0
+.chrome-discovery-profile/GraphiteDawnCache/data_1
+.chrome-discovery-profile/GraphiteDawnCache/data_2
+.chrome-discovery-profile/GraphiteDawnCache/data_3
+.chrome-discovery-profile/GraphiteDawnCache/index
+.chrome-discovery-profile/GrShaderCache/data_0
+.chrome-discovery-profile/GrShaderCache/data_1
+.chrome-discovery-profile/GrShaderCache/data_2
+.chrome-discovery-profile/GrShaderCache/data_3
+.chrome-discovery-profile/GrShaderCache/index
+.chrome-discovery-profile/optimization_guide_model_store/2/E6DC4029A1E4B4C1/3FA30D8C31CCFC63/model.tflite
+.chrome-discovery-profile/optimization_guide_model_store/24/E6DC4029A1E4B4C1/0548510CEDA703D6/model.tflite
+.chrome-discovery-profile/optimization_guide_model_store/25/E6DC4029A1E4B4C1/BC262ADE7E1138E8/visual_model_desktop.tflite
+.chrome-discovery-profile/optimization_guide_model_store/26/E6DC4029A1E4B4C1/1425DF66C2257909/model.tflite
+.chrome-discovery-profile/Safe Browsing/ChromeExtMalware.store.32_13400140746332034
+.chrome-discovery-profile/Safe Browsing/UrlBilling.store.4_13400165916276912
+.chrome-discovery-profile/Safe Browsing/UrlCsdAllowlist.store.4_13400146108567801
+.chrome-discovery-profile/Safe Browsing/UrlCsdAllowlist.store.32_13400146108587035
+.chrome-discovery-profile/Safe Browsing/UrlCsdDownloadAllowlist.store.32_13400101064912101
+.chrome-discovery-profile/Safe Browsing/UrlHighConfidenceAllowlist.store.32_13400156867598139
+.chrome-discovery-profile/Safe Browsing/UrlMalBin.store.4_13400165916167906
+.chrome-discovery-profile/Safe Browsing/UrlMalware.store.4_13400165915936077
+.chrome-discovery-profile/Safe Browsing/UrlSoceng.store.4_13400165915205013
+.chrome-discovery-profile/Safe Browsing/UrlSubresourceFilter.store.4_13400164134439638
+.chrome-discovery-profile/Safe Browsing/UrlSuspiciousSite.store.4_13400164134142301
+.chrome-discovery-profile/Safe Browsing/UrlUws.store.4_13400165916057328
+.chrome-discovery-profile/segmentation_platform/ukm_db
+.chrome-discovery-profile/segmentation_platform/ukm_db-wal
+.chrome-discovery-profile/ShaderCache/data_0
+.chrome-discovery-profile/ShaderCache/data_1
+.chrome-discovery-profile/ShaderCache/data_2
+.chrome-discovery-profile/ShaderCache/data_3
+.chrome-discovery-profile/ShaderCache/index
+.chrome-discovery-profile/Subresource Filter/Indexed Rules/37/9.58.0/Ruleset Data
+.chrome-discovery-profile/ZxcvbnData/3/ranked_dicts

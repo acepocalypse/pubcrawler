@@ -96,6 +96,6 @@ echo    • Use Ctrl+C to stop the server
 echo    • Check WEB_README.md for more information
 echo.
 
-%PYTHON_CMD% run_web.py --host 0.0.0.0 --port 52123
+%PYTHON_CMD% run_web.py --host 0.0.0.0 --port 52222 --debug
 
 pause
