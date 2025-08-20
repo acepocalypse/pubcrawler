@@ -187,7 +187,7 @@ def _extract_publication_data(work: Dict[str, Any]) -> Dict[str, Any]:
         'year': None,
         'doi': None,
         'issn': None,
-        'url': None,
+        'url': None,  # Will be set to ORCID profile URL later
         'citations': 0,
         'work_type': None,
         'publisher': None
@@ -229,10 +229,8 @@ def _extract_publication_data(work: Dict[str, Any]) -> Dict[str, Any]:
                 for ext_id in ext_id_list:
                     if not ext_id or not isinstance(ext_id, dict):
                         continue
-                        
                     id_type = ext_id.get('external-id-type', '').lower()
                     id_value = ext_id.get('external-id-value', '').strip()
-                    
                     if id_type == 'doi' and id_value:
                         # Clean DOI
                         doi = id_value.lower()
@@ -241,21 +239,7 @@ def _extract_publication_data(work: Dict[str, Any]) -> Dict[str, Any]:
                         pub_data['doi'] = doi
                     elif id_type == 'issn' and id_value:
                         pub_data['issn'] = id_value
-                    elif id_type in ['uri', 'url'] and id_value:
-                        if not pub_data['url']:
-                            pub_data['url'] = id_value
-                
-                # Extract URL from external-id-url if no URL found yet
-                if not pub_data['url']:
-                    for ext_id in ext_id_list:
-                        if not ext_id or not isinstance(ext_id, dict):
-                            continue
-                        ext_id_url = ext_id.get('external-id-url')
-                        if ext_id_url and isinstance(ext_id_url, dict):
-                            url = ext_id_url.get('value')
-                            if url:
-                                pub_data['url'] = url
-                                break
+            # Do NOT set pub_data['url'] from external ids; will set to profile URL later
         
         # Extract contributors (authors)
         contributors = work.get('contributors')
@@ -284,18 +268,32 @@ def _extract_publication_data(work: Dict[str, Any]) -> Dict[str, Any]:
 def _orcid_to_canonical(works: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert ORCID works to canonical format."""
     canonical_pubs = []
-    
+    # Try to get the ORCID ID from the first work, fallback to None
+    orcid_id = None
+    if works and isinstance(works[0], dict):
+        # ORCID ID is usually in 'path' or 'orcid' field, but not always present
+        # Instead, pass it from fetch() if needed, but here we try to extract
+        for k in ['orcid', 'path', 'source-path']:
+            if k in works[0]:
+                orcid_id = works[0][k]
+                break
+    # If not found, fallback to None
     for work in works:
         # Skip None or empty works
         if not work:
             continue
-            
         pub_data = _extract_publication_data(work)
-        
         # Skip if extraction failed or no title
         if not pub_data or not pub_data['title']:
             continue
-        
+        # Set the URL to the ORCID profile URL
+        if not orcid_id:
+            # Try to extract from work['path'] or work['orcid']
+            orcid_id = work.get('orcid') or work.get('path')
+        if orcid_id:
+            profile_url = f"https://orcid.org/{orcid_id}"
+        else:
+            profile_url = None
         canonical_pubs.append({
             'title': pub_data['title'],
             'authors': pub_data['authors'],
@@ -305,11 +303,10 @@ def _orcid_to_canonical(works: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             'issn': pub_data['issn'],
             'source': 'ORCID',
             'citations': pub_data['citations'],
-            'url': pub_data['url'],
+            'url': profile_url,
             'work_type': pub_data['work_type'],
             'publisher': pub_data['publisher']
         })
-    
     return canonical_pubs
 
 

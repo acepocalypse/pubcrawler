@@ -830,7 +830,8 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         'source': clean_value(pub.source) or "Unknown",
         'url': clean_value(pub.url),
         'coverage': coverage,
-        'source_citations': standardized_citations  # Always provide standardized citation data
+        'source_citations': standardized_citations,  # Always provide standardized citation data
+        'links': pub.links if hasattr(pub, 'links') else [],
     }
     
     # Calculate total unique coverage

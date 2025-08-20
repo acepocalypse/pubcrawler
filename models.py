@@ -52,6 +52,8 @@ class Publication:
         Number of citations (defaults to 0).
     url : Optional[str]
         Direct URL to the publication.
+    links : List[dict]
+        List of source-specific links, each as {"url": str, "source": str}.
     """
     title: str
     authors: List[str]
@@ -62,6 +64,7 @@ class Publication:
     source: str = ""
     citations: Optional[int] = 0
     url: Optional[str] = None
+    links: List[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Normalize DOI after initialization."""

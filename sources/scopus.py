@@ -269,6 +269,13 @@ def fetch(
     # --- map into dataclass ----------------------------------------------
     pubs: List[Publication] = []
     for _, row in canon_df.iterrows():
+        # If we have a Scopus EID, build the public-facing URL
+        scopus_eid = getattr(row, 'scopus_pub_id', None) or row.get('scopus_pub_id', None)
+        public_url = None
+        if scopus_eid:
+            public_url = f"https://www.scopus.com/record/display.uri?eid={scopus_eid}&origin=resultslist"
+        else:
+            public_url = row.url
         pubs.append(
             Publication(
                 title=row.title,
@@ -279,7 +286,7 @@ def fetch(
                 issn=row.issn,
                 source=row.source,  # "Scopus"
                 citations=int(row.citations),
-                url=row.url,
+                url=public_url,
             )
         )
 

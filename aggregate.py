@@ -465,9 +465,19 @@ def _merge_publications(publications: List[Publication]) -> Publication:
 
     # Aggregate all unique sources and their citation counts
     aggregated_sources: Dict[str, int] = {}
+    links: List[dict] = []
+    seen_links = set()
     for p in sorted_pubs:
+        # Collect source/citation info
         for source, cites in _extract_source_map(p).items():
             aggregated_sources[source] = max(aggregated_sources.get(source, 0), cites)
+        # Collect source-specific URLs
+        norm_source = _normalize_source_label(p.source)
+        if p.url and norm_source:
+            key = (norm_source, p.url)
+            if key not in seen_links:
+                links.append({"url": p.url, "source": norm_source})
+                seen_links.add(key)
 
     # Build a deterministic, human-readable source string
     source_order = ["Google Scholar", "Scopus", "Web of Science", "ORCID"]
@@ -501,6 +511,7 @@ def _merge_publications(publications: List[Publication]) -> Publication:
         source=merged_source,
         citations=max_citations,
         url=merged_url,
+        links=links,
     )
 
 

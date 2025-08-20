@@ -1013,21 +1013,33 @@
                                   (pub.coverage.wos ? 1 : 0) +
                                   (pub.coverage.orcid ? 1 : 0);
             
+            // Coverage icons, now clickable if link exists
             const coverageHtml = `
                 <div class="flex flex-col items-center space-y-2">
                     <div class="flex justify-center space-x-2">
-                        <div class="database-icon ${pub.coverage.google_scholar ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.google_scholar ? '#4286f5' : '#e5e7eb'}" title="Google Scholar">
-                            <i class="fab fa-google ${pub.coverage.google_scholar ? 'text-white' : 'text-gray-400'} text-xs"></i>
-                        </div>
-                        <div class="database-icon ${pub.coverage.scopus ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.scopus ? '#eb6601' : '#e5e7eb'}" title="Scopus">
-                            <i class="fas fa-database ${pub.coverage.scopus ? 'text-white' : 'text-gray-400'} text-xs"></i>
-                        </div>
-                        <div class="database-icon ${pub.coverage.wos ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.wos ? '#5e33c0' : '#e5e7eb'}" title="Web of Science">
-                            <i class="fas fa-globe ${pub.coverage.wos ? 'text-white' : 'text-gray-400'} text-xs"></i>
-                        </div>
-                        <div class="database-icon ${pub.coverage.orcid ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${pub.coverage.orcid ? '#a5cd3b' : '#e5e7eb'}" title="ORCID">
-                            <i class="fab fa-orcid ${pub.coverage.orcid ? 'text-white' : 'text-gray-400'} text-xs"></i>
-                        </div>
+                        ${(() => {
+                            const icons = [
+                                { key: 'google_scholar', fullName: 'Google Scholar', color: '#4286f5', icon: 'fab fa-google' },
+                                { key: 'scopus', fullName: 'Scopus', color: '#eb6601', icon: 'fas fa-database' },
+                                { key: 'wos', fullName: 'Web of Science', color: '#5e33c0', icon: 'fas fa-globe' },
+                                { key: 'orcid', fullName: 'ORCID', color: '#a5cd3b', icon: 'fab fa-orcid' }
+                            ];
+                            function getSourceLink(sourceName) {
+                                if (!Array.isArray(pub.links)) return null;
+                                const match = pub.links.find(l => l.source === sourceName);
+                                return match ? match.url : null;
+                            }
+                            return icons.map(ic => {
+                                const isActive = pub.coverage[ic.key];
+                                const linkUrl = getSourceLink(ic.fullName);
+                                const iconHtml = `<div class="database-icon ${isActive ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${isActive ? ic.color : '#e5e7eb'}" title="${ic.fullName}"><i class="${ic.icon} ${isActive ? 'text-white' : 'text-gray-400'} text-xs"></i></div>`;
+                                if (linkUrl && isActive) {
+                                    return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">${iconHtml}</a>`;
+                                } else {
+                                    return iconHtml;
+                                }
+                            }).join('');
+                        })()}
                     </div>
                     <div class="text-xs ${coverageCount === 4 ? 'text-green-600 font-medium' : coverageCount >= 3 ? 'text-yellow-600' : coverageCount >= 2 ? 'text-orange-600' : 'text-red-600'}">${coverageCount}/4 databases</div>
                 </div>
@@ -1039,7 +1051,7 @@
                 ? `<a href="https://doi.org/${normalizedDoi}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline text-sm">${normalizedDoi}</a>`
                 : '<span class="text-gray-400 text-sm">No DOI</span>';
 
-            // Citations by Source - Always show a consistent 2x2 grid format
+            // Citations by Source - Always show a consistent 2x2 grid format, now clickable if link exists
             let citationHtml = '';
             const sources = [
                 { key: 'google_scholar', name: 'GS', fullName: 'Google Scholar', color: '#4286f5' },
@@ -1048,12 +1060,17 @@
                 { key: 'orcid', name: 'ORCID', fullName: 'ORCID', color: '#a5cd3b' }
             ];
 
+            function getSourceLink(sourceName) {
+                if (!Array.isArray(pub.links)) return null;
+                const match = pub.links.find(l => l.source === sourceName);
+                return match ? match.url : null;
+            }
+
             const sourceBoxes = sources.map(source => {
                 const citations = pub.source_citations && pub.source_citations[source.key];
                 let isIndexed, count;
 
                 if (source.key === 'orcid') {
-                    // Use coverage to decide styling; value is always N/A
                     isIndexed = (pub.coverage && pub.coverage.orcid) === true;
                     count = 'N/A';
                 } else {
@@ -1069,20 +1086,25 @@
                     ? (isIndexed ? `${source.fullName}: N/A` : `${source.fullName}: Not indexed`)
                     : `${source.fullName}${isIndexed ? ': ' + count + ' citations' : ': Not indexed'}`;
 
-                return `
-                  <div class="citation-box" style="${boxStyle}" title="${titleText}">
+                const linkUrl = getSourceLink(source.fullName);
+                const boxContent = `
                     <div class="count">${count}</div>
                     <div class="label">${source.name}</div>
-                  </div>
                 `;
+                if (linkUrl) {
+                    return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="citation-box" style="${boxStyle}; text-decoration:none;" title="${titleText}">${boxContent}</a>`;
+                } else {
+                    return `<div class="citation-box" style="${boxStyle}" title="${titleText}">${boxContent}</div>`;
+                }
             }).join('');
-            
+
             citationHtml = `
               <div class="citation-grid mx-auto">
                 ${sourceBoxes}
               </div>
             `;
 
+            // ...existing code...
             row.innerHTML = `
                 <td data-label="Title & Authors" class="py-4 px-6">
                     <div class="font-medium">${pub.title || 'Untitled'}</div>

@@ -546,6 +546,19 @@ def _to_canonical_format(df: pd.DataFrame) -> pd.DataFrame:
     if len(canonical_df) < initial_count:
         print(f"  Deduplicated {initial_count - len(canonical_df)} WoS records. Remaining: {len(canonical_df)}")
     
+    # Always include public-facing WoS URL if wos_id (UT) is present
+    def wos_links(row):
+        links = []
+        # Add public WoS URL if wos_id exists
+        if row.get("wos_id"):
+            links.append(f"https://www.webofscience.com/wos/woscc/full-record/{row['wos_id']}")
+        # Add API-provided record link if present and not duplicate
+        url = row.get("url", "")
+        if url and url not in links:
+            links.append(url)
+        return links
+    canonical_df["links"] = canonical_df.apply(wos_links, axis=1)
+    
     return canonical_df[_CANON_COLS + _EXTRA_COLS].reset_index(drop=True)
 
 # ---------------------------------------------------------------------------
@@ -653,6 +666,7 @@ def fetch(
                 source=row.source,  # "WoS"
                 citations=int(row.citations) if pd.notna(row.citations) else 0,
                 url=row.url or None,
+                links=row.links if hasattr(row, 'links') else [],
             )
         )
 
