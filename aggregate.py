@@ -560,6 +560,7 @@ def aggregate_publications(
     max_pubs_g_scholar: int = 100,
     headless_g_scholar: bool = True,
     analyze_coverage: bool = True,
+    on_progress: Optional[callable] = None,
 ) -> List[Publication]:
     """
     Fetch publications from all sources in parallel, then merge and deduplicate.
@@ -604,6 +605,14 @@ def aggregate_publications(
     wos_mod = get_source_module("wos")
     orcid_mod = get_source_module("orcid")
 
+    # Helper to safely emit progress
+    def _progress(pct: float, msg: str):
+        try:
+            if on_progress:
+                on_progress(max(0, min(100, float(pct))), str(msg))
+        except Exception:
+            pass
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         future_to_source: Dict[concurrent.futures.Future, str] = {}
 
@@ -634,6 +643,10 @@ def aggregate_publications(
 
         available_sources = list(future_to_source.values())
         print(f"🚀 Fetching from sources: {', '.join(available_sources) or 'None'}")
+        # Start progress over first phase (0-60%) based on how many sources complete
+        total_fetch = max(1, len(future_to_source))
+        completed_fetch = 0
+        _progress(2, "Starting source fetch...")
 
         # Collect results
         for future in concurrent.futures.as_completed(future_to_source):
@@ -644,18 +657,25 @@ def aggregate_publications(
                 all_publications.extend(pubs)
             except Exception as exc:
                 print(f"❌ {source_name} generated an exception: {exc}")
+            finally:
+                completed_fetch += 1
+                pct = 2 + (58 * (completed_fetch / total_fetch))
+                _progress(pct, f"Fetched {completed_fetch}/{total_fetch} source(s)...")
 
     print(f"\nTotal publications fetched before deduplication: {len(all_publications)}")
 
+    _progress(65, "Deduplicating publications...")
     deduplicated_pubs = _deduplicate_publications(all_publications)
 
     if analyze_coverage and available_sources:
+        _progress(85, "Analyzing coverage...")
         print(f"\n🔍 Analyzing index coverage across {len(available_sources)} sources...")
         try:
             print_coverage_report(deduplicated_pubs, available_sources)
         except Exception as e:
             print(f"⚠️ Coverage analysis failed: {e}")
 
+    _progress(100, "Done")
     return deduplicated_pubs
 
 

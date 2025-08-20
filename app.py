@@ -18,6 +18,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from flask import Flask, render_template, request, jsonify, send_file
+import threading
+import uuid
 from werkzeug.exceptions import BadRequest
 
 # Import PubCrawler modules
@@ -40,11 +42,210 @@ from rapidfuzz import fuzz
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'pubcrawler-dev-key-change-in-production')
 
+# Simple in-memory progress store
+progress_store = {}
+
+def _new_job(label: str) -> str:
+    job_id = str(uuid.uuid4())
+    progress_store[job_id] = {
+        'label': label,
+        'percent': 0.0,
+        'message': 'Starting...',
+        'done': False,
+        'error': None,
+        'result': None,
+    }
+    return job_id
+
+def _update_job(job_id: str, percent: float = None, message: str = None, *, done: bool = None, error: str = None, result=None):
+    job = progress_store.get(job_id)
+    if not job:
+        return
+    if percent is not None:
+        job['percent'] = max(0.0, min(100.0, float(percent)))
+    if message is not None:
+        job['message'] = str(message)
+    if error is not None:
+        job['error'] = str(error)
+    if result is not None:
+        job['result'] = result
+    if done is not None:
+        job['done'] = bool(done)
+
+def _make_progress_cb(job_id: str):
+    def cb(p: float, msg: str):
+        _update_job(job_id, percent=p, message=msg)
+    return cb
+
 
 @app.route('/')
 def index():
     """Main page with search interface."""
     return render_template('index.html')
+@app.route('/api/progress/<job_id>')
+def api_progress(job_id):
+    job = progress_store.get(job_id)
+    if not job:
+        return jsonify({'error': 'Invalid job id'}), 404
+    return jsonify({
+        'job_id': job_id,
+        'label': job['label'],
+        'percent': job['percent'],
+        'message': job['message'],
+        'done': job['done'],
+        'error': job['error'],
+        'result': job.get('result') if job.get('done') else None,
+    })
+
+@app.route('/api/discover-profiles/start', methods=['POST'])
+def api_discover_profiles_start():
+    try:
+        data = request.get_json() or {}
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        affiliation = (data.get('affiliation') or '').strip()
+        if not first_name or not last_name:
+            return jsonify({'error': 'Both first name and last name are required'}), 400
+
+        # Prepare keys
+        api_keys = data.get('api_keys', {})
+        default_keys = get_api_keys()
+        clean_api_keys = {
+            'scopus_api_key': api_keys.get('scopus_api_key', '').strip() or default_keys.get('scopus_api_key'),
+            'wos_api_key': api_keys.get('wos_api_key', '').strip() or default_keys.get('wos_api_key'),
+            'orcid_client_id': api_keys.get('orcid_client_id', '').strip() or default_keys.get('orcid_client_id'),
+            'orcid_client_secret': api_keys.get('orcid_client_secret', '').strip() or default_keys.get('orcid_client_secret')
+        }
+
+        job_id = _new_job('discover_profiles')
+
+        def worker():
+            try:
+                result = discover_researcher_profiles(
+                    first_name=first_name,
+                    last_name=last_name,
+                    affiliation=affiliation or None,
+                    api_keys=clean_api_keys,
+                    verify_profiles=True,
+                    on_progress=_make_progress_cb(job_id)
+                )
+                # Prepare serialized result (subset) for retrieval if desired
+                candidates = []
+                for candidate in result.candidates:
+                    candidates.append({
+                        'source': candidate.source,
+                        'profile_id': candidate.profile_id,
+                        'name': candidate.name,
+                        'affiliation': candidate.affiliation,
+                        'confidence_score': round(candidate.confidence_score, 3),
+                        'profile_url': candidate.profile_url,
+                        'sample_publications': candidate.sample_publications[:3],
+                        'verification_info': candidate.verification_info,
+                        'publication_count': candidate.publication_count,
+                    })
+                payload = {
+                    'success': result.success,
+                    'error': result.error,
+                    'query': {'first_name': first_name, 'last_name': last_name, 'affiliation': affiliation},
+                    'candidates': candidates,
+                }
+                _update_job(job_id, percent=100, message='Done', done=True, result=payload)
+            except Exception as e:
+                _update_job(job_id, error=str(e), done=True)
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({'job_id': job_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/search/start', methods=['POST'])
+def api_search_start():
+    try:
+        data = request.get_json() or {}
+        researcher_name = (data.get('researcher_name') or '').strip()
+        if not researcher_name:
+            return jsonify({'error': 'Researcher name is required'}), 400
+        parts = researcher_name.split()
+        if len(parts) < 2:
+            return jsonify({'error': 'Please provide both first and last name'}), 400
+        first_name, last_name = parts[0], ' '.join(parts[1:])
+
+        # Build author
+        affiliation = (data.get('affiliation') or '').strip()
+        author = Author(
+            first_name=first_name,
+            last_name=last_name,
+            affiliation=affiliation,
+            gs_id=(data.get('google_scholar_id') or '').strip(),
+            scopus_id=(data.get('scopus_id') or '').strip(),
+            wos_id=(data.get('wos_id') or '').strip(),
+            orcid_id=(data.get('orcid_id') or '').strip(),
+        )
+
+        # API keys
+        api_keys = data.get('api_keys', {})
+        default_keys = get_api_keys()
+        clean_api_keys = {
+            'scopus_api_key': api_keys.get('scopus_api_key', '').strip() or default_keys.get('scopus_api_key'),
+            'wos_api_key': api_keys.get('wos_api_key', '').strip() or default_keys.get('wos_api_key'),
+            'orcid_client_id': api_keys.get('orcid_client_id', '').strip() or default_keys.get('orcid_client_id'),
+            'orcid_client_secret': api_keys.get('orcid_client_secret', '').strip() or default_keys.get('orcid_client_secret')
+        }
+
+        job_id = _new_job('search_publications')
+
+        def worker():
+            try:
+                pubs = aggregate_publications(
+                    author=author,
+                    api_keys=clean_api_keys,
+                    max_pubs_g_scholar=1000,
+                    headless_g_scholar=True,
+                    analyze_coverage=False,
+                    on_progress=_make_progress_cb(job_id)
+                )
+
+                # Determine used sources for coverage
+                available_sources = []
+                if author.gs_id:
+                    available_sources.append("Google Scholar")
+                if clean_api_keys.get('scopus_api_key') and (author.scopus_id or author.orcid_id or author.affiliation):
+                    available_sources.append("Scopus")
+                if clean_api_keys.get('wos_api_key') and (author.wos_id or author.affiliation or author.orcid_id):
+                    available_sources.append("Web of Science")
+                if clean_api_keys.get('orcid_client_id') and clean_api_keys.get('orcid_client_secret') and author.orcid_id:
+                    available_sources.append("ORCID")
+
+                coverage_report = analyze_publication_coverage(pubs, available_sources)
+                payload = {
+                    'success': True,
+                    'researcher': {
+                        'name': f"{author.first_name} {author.last_name}",
+                        'affiliation': author.affiliation,
+                        'gs_id': author.gs_id,
+                        'scopus_id': author.scopus_id,
+                        'wos_id': author.wos_id,
+                        'orcid_id': author.orcid_id,
+                        'search_timestamp': datetime.now().isoformat(),
+                    },
+                    'summary': {
+                        'total_publications': len(pubs),
+                        'total_before_filters': len(pubs),
+                        'unique_publications': len(pubs),
+                        'sources_used': available_sources,
+                        'coverage_report': coverage_report.get('summary', {}),
+                    },
+                    'publications': [_format_publication(p, pubs) for p in pubs],
+                    'coverage_analysis': coverage_report,
+                }
+                _update_job(job_id, percent=100, message='Done', done=True, result=payload)
+            except Exception as e:
+                _update_job(job_id, error=str(e), done=True)
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({'job_id': job_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/test-matching')

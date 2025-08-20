@@ -21,7 +21,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable
 import itertools
 import inspect
 
@@ -744,7 +744,11 @@ class GoogleScholarDiscovery(BaseDiscovery):
         try:
             from bs4 import BeautifulSoup
             headers = {'User-Agent': DEFAULT_USER_AGENT}
-            url = f"https://scholar.google.com/citations?user={profile_id}&hl=en&view_op=list_works&sortby=pubdate"
+            # Only first page: cstart=0, pagesize=20 (do not attempt to load more)
+            url = (
+                f"https://scholar.google.com/citations?"
+                f"user={profile_id}&hl=en&view_op=list_works&sortby=pubdate&cstart=0&pagesize=20"
+            )
             resp = requests.get(url, headers=headers, timeout=8)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -1497,12 +1501,25 @@ class ProfileDiscoveryService:
             self.sources["Web of Science"] = WOSDiscovery(self.api_keys['wos_api_key'])
     
     def discover_all_profiles(self, first_name: str, last_name: str, 
-                            affiliation: str = None) -> DiscoveryResult:
-        """Discover profiles from all available sources - always search all sources."""
+                            affiliation: str = None,
+                            on_progress: Optional[Callable[[float, str], None]] = None) -> DiscoveryResult:
+        """Discover profiles from all available sources - always search all sources, reporting progress."""
+        def _progress(p: float, msg: str):
+            try:
+                if on_progress:
+                    on_progress(max(0.0, min(100.0, float(p))), str(msg))
+            except Exception:
+                pass
+
         all_candidates, errors = [], []
-        
+
+        total_sources = max(1, len(self.sources))
+        completed = 0
+        _progress(2, "Initializing discovery...")
+
         for name, service in self.sources.items():
             try:
+                _progress(5 + (65 * (completed / total_sources)), f"Searching {name}...")
                 candidates = service.search_profiles(first_name, last_name, affiliation)
                 
                 # Store Google Scholar driver for potential reuse
@@ -1528,7 +1545,11 @@ class ProfileDiscoveryService:
                 error_msg = f"{name} discovery failed: {e}"
                 logger.error(error_msg, exc_info=True)
                 errors.append(error_msg)
+            finally:
+                completed += 1
+                _progress(5 + (65 * (completed / total_sources)), f"Finished {name} ({completed}/{total_sources})")
         
+        _progress(75, "Aggregating results...")
         all_candidates.sort(key=lambda x: x.confidence_score, reverse=True)
         return DiscoveryResult(
             success=not errors,
@@ -1604,8 +1625,11 @@ class ProfileDiscoveryService:
             except Exception:
                 return []
 
-            # Build and navigate to the author's publications list (sorted by pubdate)
-            url = f"https://scholar.google.com/citations?user={profile_id}&hl=en&view_op=list_works&sortby=pubdate"
+            # Only first page of works; no pagination, no "Show more" clicks
+            url = (
+                f"https://scholar.google.com/citations?"
+                f"user={profile_id}&hl=en&view_op=list_works&sortby=pubdate&cstart=0&pagesize=20"
+            )
             if url not in (driver.current_url or ""):
                 driver.get(url)
 
@@ -1618,7 +1642,7 @@ class ProfileDiscoveryService:
             except Exception:
                 pass
 
-            # Wait for publication rows to render and scrape titles
+            # Wait for publication rows to render and scrape titles (first page only)
             try:
                 WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "tr.gsc_a_tr"))
@@ -1689,7 +1713,8 @@ def discover_researcher_profiles(
     last_name: str, 
     affiliation: str = None, 
     api_keys: Dict[str, str] = None, 
-    verify_profiles: bool = False
+    verify_profiles: bool = False,
+    on_progress: Optional[Callable[[float, str], None]] = None,
 ) -> DiscoveryResult:
     """
     Discover researcher profiles across all academic databases.
@@ -1701,20 +1726,30 @@ def discover_researcher_profiles(
         api_keys: Dictionary of API keys for various services
         verify_profiles: Whether to fetch sample publications for verification (up to 3)
     """
+    def _progress(p: float, msg: str):
+        try:
+            if on_progress:
+                on_progress(max(0.0, min(100.0, float(p))), str(msg))
+        except Exception:
+            pass
+
     service = ProfileDiscoveryService(api_keys)
-    result = service.discover_all_profiles(first_name, last_name, affiliation)
+    result = service.discover_all_profiles(first_name, last_name, affiliation, on_progress=_progress)
 
     if verify_profiles and result.success:
         # Verify top candidates only, prioritizing highest confidence scores
         # Limit to top 5 to avoid excessive verification calls
         top_candidates = sorted(result.candidates, key=lambda x: x.confidence_score, reverse=True)[:5]
+        total = max(1, len(top_candidates))
         for i, candidate in enumerate(top_candidates):
             # Find the original candidate in the list and update it
+            _progress(80 + (20 * ((i) / total)), f"Verifying candidates ({i+1}/{total})...")
             for j, orig_candidate in enumerate(result.candidates):
                 if (orig_candidate.source == candidate.source and 
                     orig_candidate.profile_id == candidate.profile_id):
                     result.candidates[j] = service.verify_profile(candidate, MAX_PUBLICATION_SAMPLES)
                     break
+        _progress(100, "Discovery complete")
 
     return result
 
