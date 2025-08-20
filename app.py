@@ -682,9 +682,10 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         'wos': False,
         'orcid': False
     }
-    
-    # Track citations from each source
-    source_citations = {}
+
+    # Track citations and URLs from each source
+    source_citations: Dict[str, Optional[int]] = {}
+    source_urls: Dict[str, str] = {}
     
     # Check if this publication has already been merged from multiple sources
     source_lower = pub.source.lower() if pub.source else ""
@@ -725,15 +726,23 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         if 'google scholar' in source_lower:
             coverage['google_scholar'] = True
             source_citations['google_scholar'] = clean_value(pub.citations) or 0
+            if pub.url:
+                source_urls['google_scholar'] = clean_value(pub.url)
         elif 'scopus' in source_lower:
             coverage['scopus'] = True
             source_citations['scopus'] = clean_value(pub.citations) or 0
+            if pub.url:
+                source_urls['scopus'] = clean_value(pub.url)
         elif 'web of science' in source_lower or 'wos' in source_lower:
             coverage['wos'] = True
             source_citations['wos'] = clean_value(pub.citations) or 0
+            if pub.url:
+                source_urls['wos'] = clean_value(pub.url)
         elif 'orcid' in source_lower:
             coverage['orcid'] = True
             source_citations['orcid'] = clean_value(pub.citations) or 0
+            if pub.url:
+                source_urls['orcid'] = clean_value(pub.url)
         
         # If we have all publications, check for duplicates across sources using fuzzy matching
         if all_publications:
@@ -760,6 +769,7 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
             for match_pub in matching_pubs:
                 other_source_lower = match_pub.source.lower() if match_pub.source else ""
                 match_citations = clean_value(match_pub.citations) or 0
+                match_url = clean_value(match_pub.url)
                 
                 # Handle both single sources AND already-merged sources
                 if 'multiple sources:' in other_source_lower:
@@ -795,18 +805,30 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
                             source_citations['orcid'] = int(match.group(1))
                 else:
                     # Handle single sources
-                    if 'google scholar' in other_source_lower and not coverage['google_scholar']:
-                        coverage['google_scholar'] = True
-                        source_citations['google_scholar'] = match_citations
-                    elif 'scopus' in other_source_lower and not coverage['scopus']:
-                        coverage['scopus'] = True
-                        source_citations['scopus'] = match_citations
-                    elif ('web of science' in other_source_lower or 'wos' in other_source_lower) and not coverage['wos']:
-                        coverage['wos'] = True
-                        source_citations['wos'] = match_citations
-                    elif 'orcid' in other_source_lower and not coverage['orcid']:
-                        coverage['orcid'] = True
-                        source_citations['orcid'] = match_citations
+                    if 'google scholar' in other_source_lower:
+                        if not coverage['google_scholar']:
+                            coverage['google_scholar'] = True
+                            source_citations['google_scholar'] = match_citations
+                        if match_url and 'google_scholar' not in source_urls:
+                            source_urls['google_scholar'] = match_url
+                    elif 'scopus' in other_source_lower:
+                        if not coverage['scopus']:
+                            coverage['scopus'] = True
+                            source_citations['scopus'] = match_citations
+                        if match_url and 'scopus' not in source_urls:
+                            source_urls['scopus'] = match_url
+                    elif ('web of science' in other_source_lower or 'wos' in other_source_lower):
+                        if not coverage['wos']:
+                            coverage['wos'] = True
+                            source_citations['wos'] = match_citations
+                        if match_url and 'wos' not in source_urls:
+                            source_urls['wos'] = match_url
+                    elif 'orcid' in other_source_lower:
+                        if not coverage['orcid']:
+                            coverage['orcid'] = True
+                            source_citations['orcid'] = match_citations
+                        if match_url and 'orcid' not in source_urls:
+                            source_urls['orcid'] = match_url
     
     # Ensure all sources have a citation count (0 if not available)
     standardized_citations = {
@@ -830,7 +852,8 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         'source': clean_value(pub.source) or "Unknown",
         'url': clean_value(pub.url),
         'coverage': coverage,
-        'source_citations': standardized_citations  # Always provide standardized citation data
+        'source_citations': standardized_citations,  # Always provide standardized citation data
+        'source_urls': source_urls
     }
     
     # Calculate total unique coverage
