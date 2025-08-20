@@ -6,6 +6,18 @@ echo.
 echo 🚀 Starting PubCrawler Web Interface for Network Access...
 echo.
 
+REM Default port
+set PORT=
+
+REM Parse port from command line arguments (if provided)
+REM Usage: start_network.bat [port]
+if not "%1"=="" (
+    set PORT=%1
+) else (
+    REM Randomize port between 1024 and 65535
+    for /f "usebackq delims=" %%p in (`powershell -Command "Get-Random -Minimum 1024 -Maximum 65535"`) do set PORT=%%p
+)
+
 REM Check for different Python installations (including Anaconda/Conda)
 set PYTHON_CMD=
 py --version >nul 2>&1
@@ -87,8 +99,12 @@ if not exist "venv" (
     )
 )
 
+REM Start ngrok with custom domain and selected port
+echo 🌐 Starting ngrok tunnel on port %PORT%...
+start "" ngrok http --domain=evident-fawn-modest.ngrok-free.app %PORT%
+
 REM Start the web server
-echo ✅ Your network URL is: http://10.165.41.221:52221
+echo ✅ Your network URL is: http://10.165.41.221:%PORT%
 echo.
 echo 💡 Tips:
 echo    • Share the network URL above with your coworkers
@@ -96,6 +112,7 @@ echo    • Use Ctrl+C to stop the server
 echo    • Check WEB_README.md for more information
 echo.
 
-%PYTHON_CMD% run_web.py --host 0.0.0.0 --port 52221 --debug
+REM Add --no-reload to prevent double startup (if supported)
+%PYTHON_CMD% run_web.py --host 0.0.0.0 --port %PORT% --debug --no-reload
 
 pause

@@ -93,6 +93,12 @@ def main():
         help='Skip dependency check'
     )
     
+    parser.add_argument(
+        '--no-reload',
+        action='store_true',
+        help='Disable Flask auto-reloader (prevents double startup)'
+    )
+    
     args = parser.parse_args()
     
     # Check Python version
@@ -119,7 +125,8 @@ def main():
         app.run(
             host=args.host,
             port=args.port,
-            debug=args.debug
+            debug=args.debug,
+            use_reloader=not args.no_reload
         )
         
     except ImportError as e:

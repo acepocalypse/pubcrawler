@@ -33,7 +33,7 @@ def get_api_keys() -> Dict[str, Optional[str]]:
 
 # Default search settings
 DEFAULT_SEARCH_SETTINGS = {
-    "max_pubs_g_scholar": 100,
+    "max_pubs_g_scholar": 2000,
     "headless_g_scholar": True,
     "analyze_coverage": True
 }

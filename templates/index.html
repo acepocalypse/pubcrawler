@@ -173,12 +173,20 @@
             margin-top: .5rem;
             max-height: 84px;
             overflow-y: auto;
+            /* Ensure contained inside card, no overflow */
+            padding-right: 0;
         }
         .profile-modal .sample-pubs li {
             color: #4b5563; /* gray-600 */
             font-size: .85rem;
             line-height: 1.25rem;
             margin-bottom: .25rem;
+            /* Truncate to one line with ellipsis */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            display: block;
         }
         .profile-modal .split {
             display: grid;
@@ -624,6 +632,10 @@
                         <button id="cancel-selection" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
                             Cancel
                         </button>
+                        <!-- New Select All button -->
+                        <button id="select-all-btn" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                            Select All
+                        </button>
                         <button id="apply-selection" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                             Apply Selected IDs
                         </button>
@@ -720,6 +732,7 @@
         const closeModal = document.getElementById('close-modal');
         const cancelSelection = document.getElementById('cancel-selection');
         const applySelection = document.getElementById('apply-selection');
+        const selectAllBtn = document.getElementById('select-all-btn');
         const discoveryResults = document.getElementById('discovery-results');
     const searchProgress = document.getElementById('search-progress');
     const searchProgressText = document.getElementById('search-progress-text');
@@ -742,6 +755,8 @@
             closeModal.addEventListener('click', closeProfileModal);
             cancelSelection.addEventListener('click', closeProfileModal);
             applySelection.addEventListener('click', applySelectedProfiles);
+            // New: Select All button
+            selectAllBtn.addEventListener('click', selectAllProfiles);
             
             // Close modal when clicking outside
             profileModal.addEventListener('click', (e) => {
@@ -1312,8 +1327,19 @@
             alert('Settings panel coming soon!');
         }
 
+        // Clears all profile ID input fields. Runs whenever Autofill is pressed.
+        function clearIdInputs() {
+            document.getElementById('google-scholar-id').value = '';
+            document.getElementById('scopus-id').value = '';
+            document.getElementById('wos-id').value = '';
+            document.getElementById('orcid-id').value = '';
+        }
+
         // Profile Discovery Functions
     async function handleAutofill() {
+            // Always clear ID fields on press (before any validations or network calls)
+            clearIdInputs();
+
             const researcherName = document.getElementById('researcher-name').value.trim();
             const affiliation = document.getElementById('affiliation').value.trim();
             
@@ -1596,11 +1622,7 @@
                 s.includes('orcid') ? { label: 'ORCID',          icon: 'fab fa-orcid',   color: '#a5cd3b' } :
                 { label: candidate.source || 'Source', icon: 'fas fa-database', color: '#6b7280' };
 
-            const docCount = candidate.verification_info && candidate.verification_info.document_count
-                ? `<span class="ml-2">• Publications: ${candidate.verification_info.document_count}</span>`
-                : '';
-
-            // New: robust publication count from multiple possible fields
+            // Publication count logic
             const pubCountRaw =
                 (candidate.publication_count != null ? candidate.publication_count : null) ??
                 (candidate.verification_info && candidate.verification_info.publication_count != null
@@ -1612,48 +1634,51 @@
 
             const pubCountIsMin = !!(candidate.verification_info && candidate.verification_info.publication_count_is_min);
             const pubCount = (pubCountRaw != null && !isNaN(pubCountRaw)) ? Number(pubCountRaw) : null;
-            const pubMeta = (pubCount != null)
-                ? `<span class="ml-2">• Publications: ${pubCount}${pubCountIsMin ? '+' : ''}</span>`
-                : '';
 
+            // Sample publications (truncate to one line, add ... if too long)
             const samplePubs = candidate.sample_publications && candidate.sample_publications.length > 0
-                ? candidate.sample_publications.slice(0, 2).map(p => `<li>• ${p}</li>`).join('')
+                ? candidate.sample_publications.slice(0, 2).map(p => {
+                    // Truncate to 90 chars, add ... if longer
+                    let txt = String(p);
+                    if (txt.length > 90) txt = txt.slice(0, 87) + '...';
+                    return `<li class="truncate">• ${txt}</li>`;
+                }).join('')
                 : '<li class="italic text-gray-500">No sample publications available</li>';
 
+            // Card layout
             return `
-                <div class="candidate-card p-4">
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="flex items-start gap-3">
-                            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0" style="background:${meta.color}">
-                                <i class="${meta.icon} text-sm"></i>
-                            </div>
-                            <div>
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span class="font-medium text-gray-900">${formatName(candidate.name)}</span>
-                                    <span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">${meta.label}</span>
-                                    <span class="badge" style="background:${confMeta.bg};color:${confMeta.fg}">${confMeta.label}</span>
-                                </div>
-                                ${candidate.affiliation ? `<div class="meta mt-1">${candidate.affiliation}</div>` : ''}
-                                <div class="meta mt-1">
-                                    <span><strong>ID:</strong> ${candidate.profile_id}</span>${pubMeta}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            ${candidate.profile_url ? `<a href="${candidate.profile_url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm" title="Open profile"><i class="fas fa-external-link-alt"></i></a>` : ''}
-                            <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
-                                <input 
-                                    type="checkbox"
-                                    class="candidate-select h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                                    data-gindex="${index}"
-                                >
-                                <span>Select</span>
-                            </label>
+                <div class="candidate-card p-3 flex gap-3 items-stretch hover:shadow-lg transition-shadow duration-150">
+                    <div class="flex flex-col items-center justify-start pt-2 pr-2">
+                        <label class="inline-flex items-center cursor-pointer select-none">
+                            <input 
+                                type="checkbox"
+                                class="candidate-select h-6 w-6 text-blue-600 focus:ring-blue-500 border-gray-300 rounded transition"
+                                data-gindex="${index}"
+                            >
+                        </label>
+                        <div class="mt-3 w-9 h-9 rounded-full flex items-center justify-center text-white" style="background:${meta.color}">
+                            <i class="${meta.icon} text-base"></i>
                         </div>
                     </div>
-                    <ul class="sample-pubs">
-                        ${samplePubs}
-                    </ul>
+                    <div class="flex-1 flex flex-col justify-between">
+                        <div>
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                                <span class="font-semibold text-gray-900 text-base">${formatName(candidate.name)}</span>
+                                <span class="badge" style="background:${confMeta.bg};color:${confMeta.fg}">${confMeta.label}</span>
+                                ${candidate.profile_url ? `<a href="${candidate.profile_url}" target="_blank" class="ml-1 text-blue-600 hover:text-blue-800 text-xs" title="Open profile"><i class="fas fa-external-link-alt"></i></a>` : ''}
+                            </div>
+                            ${candidate.affiliation ? `<div class="meta text-sm text-gray-600 mb-1">${candidate.affiliation}</div>` : ''}
+                        </div>
+                        <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 mt-2 mb-2">
+                            <span><strong>ID:</strong> <span class="text-gray-700">${candidate.profile_id}</span></span>
+                            ${pubCount != null ? `<span><strong>Publications:</strong> <span class="text-gray-700">${pubCount}${pubCountIsMin ? '+' : ''}</span></span>` : ''}
+                        </div>
+                        <div class="bg-gray-50 rounded-md px-3 py-2 mt-1">
+                            <ul class="sample-pubs text-xs text-gray-700 leading-tight">
+                                ${samplePubs}
+                            </ul>
+                        </div>
+                    </div>
                 </div>
             `;
         }

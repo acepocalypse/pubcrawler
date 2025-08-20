@@ -41,6 +41,21 @@ try:
     from selenium.webdriver.support.ui import WebDriverWait
     from webdriver_manager.chrome import ChromeDriverManager
     SCRAPING_DEPS_AVAILABLE = True
+
+    # Patch undetected_chromedriver quit to avoid WinError 6 on Windows
+    def _patched_quit(self):
+        try:
+            self._original_quit()
+        except OSError as e:
+            if "WinError 6" in str(e) or "The handle is invalid" in str(e):
+                pass
+            else:
+                raise
+
+    if hasattr(uc.Chrome, 'quit') and not hasattr(uc.Chrome, '_original_quit'):
+        uc.Chrome._original_quit = uc.Chrome.quit
+        uc.Chrome.quit = _patched_quit
+
 except ImportError:
     SCRAPING_DEPS_AVAILABLE = False
 
@@ -78,6 +93,9 @@ MIN_NAME_SIMILARITY = 0.85
 MAX_SEARCH_ATTEMPTS = 2
 MAX_DRIVER_TIMEOUT = 45
 MAX_PUBLICATION_SAMPLES = 3
+
+# Toggle headless/headful mode here
+HEADLESS_MODE = True  # Set to True for headless, False for headful
 
 # Data Models
 @dataclass
@@ -211,82 +229,33 @@ class AdaptiveHumanBehaviorSimulator:
         self.last_break_time = time.time()
         self.consecutive_actions = 0
 
-class OptimizedCaptchaHandler:
-    """Optimized CAPTCHA detection with caching"""
-    
-    def __init__(self, driver, behavior_sim: AdaptiveHumanBehaviorSimulator):
-        self.driver = driver
-        self.behavior_sim = behavior_sim
-        self.captcha_encounter_count = 0
-        self.last_check_url = None
-        self.last_check_result = None
-        
-    def detect_captcha(self) -> bool:
-        """Optimized CAPTCHA detection with caching"""
-        try:
-            current_url = self.driver.current_url
-            
-            if current_url == self.last_check_url:
-                return self.last_check_result
-                
-            patterns = ['recaptcha', '/sorry/', 'captcha', 'unusual traffic', 'verification']
-            
-            if any(pattern in current_url.lower() for pattern in patterns):
-                self.last_check_url = current_url
-                self.last_check_result = True
-                return True
-                
-            if any(pattern in self.driver.title.lower() for pattern in patterns):
-                self.last_check_url = current_url
-                self.last_check_result = True
-                return True
-                
-            self.last_check_url = current_url
-            self.last_check_result = False
-            return False
-            
-        except:
-            return False
-            
-    def avoid_captcha_strategy(self) -> bool:
-        """Optimized CAPTCHA avoidance"""
-        logger.info("Implementing quick CAPTCHA avoidance...")
-        # Exponential backoff with jitter
-        base = 15
-        delay = min(180, base * (2 ** self.captcha_encounter_count)) + random.uniform(0.5, 2.5)
-        logger.info(f"Waiting {delay:.1f} seconds before retry...")
-        time.sleep(delay)
-        if self.captcha_encounter_count > 0:
-            try:
-                self.driver.delete_all_cookies()
-            except:
-                pass
-        # Stop after a few hits to avoid triggering more blocks
-        return self.captcha_encounter_count < 3
-
 class OptimizedStealthDriver:
     def __init__(self):
         self.behavior_sim = AdaptiveHumanBehaviorSimulator()
         self.ua = UserAgent()
 
-    def create_driver(self, headless: bool = True) -> uc.Chrome:
-        """Create optimized undetected Chrome driver"""
+    def create_driver(self, headless: bool = None, proxy: Optional[str] = None) -> uc.Chrome:
+        """Create optimized undetected Chrome driver with stealth & optional proxy"""
         options = uc.ChromeOptions()
 
-        # Anti-detection
+        # --- Anti-detection flags & UA ---
         user_agent = self.ua.random
         options.add_argument(f'--user-agent={user_agent}')
         options.add_argument('--disable-blink-features=AutomationControlled')
-
-        # Performance flags
         options.add_argument('--window-size=1920,1080')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
         options.add_argument('--disable-web-security')
         options.add_argument('--lang=en-US,en;q=0.9')
+        options.add_argument('--password-store=basic')
+        options.add_argument('--enable-features=NetworkService,NetworkServiceInProcess')
 
-        # Preferences
+        # --- Optional proxy ---
+        if proxy:
+            options.add_argument(f'--proxy-server={proxy}')
+
+        # --- Preferences ---
         prefs = {
             'profile.default_content_setting_values.notifications': 2,
             'profile.default_content_settings.popups': 0,
@@ -296,73 +265,106 @@ class OptimizedStealthDriver:
         }
         options.add_experimental_option('prefs', prefs)
 
-        if headless:
-            options.add_argument('--headless=new')
-            options.add_argument('--no-first-run')
-            options.add_argument('--disable-default-apps')
+        # Always use global toggle
+        headless = HEADLESS_MODE if headless is None else headless
 
         try:
             driver = uc.Chrome(options=options, headless=headless, version_main=None)
-            self._inject_stealth_js(driver)
+            self._post_boot_stealth(driver)
             driver.set_page_load_timeout(20)
             driver.implicitly_wait(3)
-            logger.info(f"Successfully created optimized Chrome driver (headless={headless})")
             return driver
         except Exception as e:
             logger.error(f"Failed to create undetected-chromedriver: {e}")
-            return self._create_fallback_driver(headless)
+            return self._create_fallback_driver(headless, proxy)
 
-    def _create_fallback_driver(self, headless: bool = True):
-        """Create fallback driver using regular Selenium"""
+    def _create_fallback_driver(self, headless: bool = None, proxy: Optional[str] = None):
         logger.info("Creating fallback driver with regular Selenium...")
         options = Options()
-
         options.add_argument('--disable-blink-features=AutomationControlled')
-        # FIX: guard experimental options to avoid "unrecognized chrome option" crashes
         try:
             options.add_experimental_option('useAutomationExtension', False)
-        except Exception as e:
-            logger.debug(f"Ignoring unsupported experimental option useAutomationExtension: {e}")
+        except Exception:
+            pass
         try:
             options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-        except Exception as e:
-            logger.debug(f"Ignoring unsupported experimental option excludeSwitches: {e}")
+        except Exception:
+            pass
         options.add_argument('--window-size=1920,1080')
         options.page_load_strategy = 'eager'
-
-        if headless:
-            options.add_argument('--headless=new')
-            options.add_argument('--no-first-run')
-            options.add_argument('--disable-default-apps')
-
+        if proxy:
+            options.add_argument(f'--proxy-server={proxy}')
+        # Always use global toggle
+        headless = HEADLESS_MODE if headless is None else headless
+        # Remove headless argument block
+        # if headless:
+        #     options.add_argument('--headless=new')
+        #     options.add_argument('--no-first-run')
+        #     options.add_argument('--disable-default-apps')
+        options.add_argument('--no-first-run')
+        options.add_argument('--disable-default-apps')
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-        self._inject_stealth_js(driver)
+        self._post_boot_stealth(driver)
         driver.set_page_load_timeout(20)
         driver.implicitly_wait(3)
-        logger.info(f"Created fallback driver (headless={headless})")
         return driver
-            
-    def _inject_stealth_js(self, driver):
-        """Inject essential stealth JavaScript"""
+
+    def _post_boot_stealth(self, driver):
+        """Stealth JS, language/platform/vendor, timezone, & cookie jar setup"""
+        # --- JS stealth shims ---
         stealth_js = """
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         window.chrome = {runtime: {}};
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [1, 2, 3].map(n => ({
-                name: `Plugin ${n}`,
-                filename: `plugin${n}.dll`,
-                length: 1
-            }))
-        });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' });
+        try {
+          const getParameter = WebGLRenderingContext.prototype.getParameter;
+          WebGLRenderingContext.prototype.getParameter = function(parameter) {
+            if (parameter === 37445) return 'Intel Open Source Technology Center';
+            if (parameter === 37446) return 'Mesa DRI Intel(R) UHD Graphics';
+            return getParameter.call(this, parameter);
+          };
+        } catch(e) {}
         """
-        
         try:
             driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': stealth_js})
-        except:
+        except Exception:
             try:
                 driver.execute_script(stealth_js)
-            except:
+            except Exception:
                 pass
+
+        # --- Timezone spoof (match en-US) ---
+        try:
+            driver.execute_cdp_cmd('Emulation.setTimezoneOverride', {'timezoneId': 'America/Los_Angeles'})
+        except Exception:
+            pass
+
+        # --- Cookie jar: pre-load from disk if present (reduces consent prompts) ---
+        try:
+            if os.path.exists(GS_COOKIES_PATH):
+                with open(GS_COOKIES_PATH, 'r', encoding='utf-8') as f:
+                    cookies = json.load(f)
+                driver.get("https://scholar.google.com/")
+                for ck in cookies:
+                    try:
+                        driver.add_cookie(ck)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.debug(f"Cookie preload skipped: {e}")
+
+    # Persist cookies for next run
+    def save_cookies(self, driver):
+        try:
+            cookies = driver.get_cookies()
+            with open(GS_COOKIES_PATH, 'w', encoding='utf-8') as f:
+                json.dump(cookies, f)
+        except Exception as e:
+            logger.debug(f"Cookie save skipped: {e}")
+
 
 # Discovery Classes
 class GoogleScholarDiscovery(BaseDiscovery):
@@ -429,6 +431,10 @@ class GoogleScholarDiscovery(BaseDiscovery):
                     all_candidates.extend(session_candidates)
                     logger.info(f"Session successful. Found {len(session_candidates)} total candidates.")
                     # Store driver for potential reuse instead of cleaning up
+                    try:
+                        self.stealth_driver.save_cookies(driver)
+                    except Exception:
+                        pass
                     self._last_driver = driver
                     driver = None  # Prevent cleanup in finally block
                     break
@@ -477,21 +483,35 @@ class GoogleScholarDiscovery(BaseDiscovery):
             logger.warning(f"Error in single search for {search_type}: {e}")
             raise
 
-    def _handle_consent(self, driver, xpath: str):
-        """Handle consent pop-ups on Google/Scholar."""
+    def _handle_consent(self, driver, xpath_primary: str):
+        """Robust consent handler for different regions/locales"""
+        XPATHS = [
+            xpath_primary,  # caller's hint
+            "//button[.//span[contains(translate(., 'ACEPTAR', 'aceptar'), 'acept')]]",
+            "//button[contains(translate(., 'OK', 'ok'), 'ok')]",
+            "//button[contains(., 'I agree')]",
+            "//button[contains(., 'Accept all')]",
+            "//div[@role='dialog']//button[contains(., 'Accept')]",
+        ]
         try:
-            consent_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, xpath))
-            )
-            driver.execute_script("arguments[0].scrollIntoView();", consent_button)
-            time.sleep(0.3)
-            consent_button.click()
-            logger.info("Consent button clicked.")
-            time.sleep(random.uniform(1.0, 1.5))
-        except TimeoutException:
-            logger.debug("Consent form not found.")
+            for xp in XPATHS:
+                try:
+                    btn = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xp)))
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                    time.sleep(0.25)
+                    btn.click()
+                    time.sleep(random.uniform(0.8, 1.3))
+                    break
+                except TimeoutException:
+                    continue
         except Exception as e:
-            logger.debug(f"Consent handling error: {e}")
+            logger.debug(f"Consent handling benign error: {e}")
+        finally:
+            # Save any consent cookies for reuse
+            try:
+                self.stealth_driver.save_cookies(driver)
+            except Exception:
+                pass
 
     def _prepare_search_queries(self, full_name: str, affiliation: str) -> List[tuple]:
         """Prepare list of search queries to try."""
@@ -507,8 +527,14 @@ class GoogleScholarDiscovery(BaseDiscovery):
         return None
 
     def _create_and_setup_driver(self, proxy: Optional[str]):
-        """Create and setup a WebDriver instance using OptimizedStealthDriver."""
-        driver = self.stealth_driver.create_driver(headless=True)
+        # Always use global toggle for headless/headful
+        driver = self.stealth_driver.create_driver(headless=HEADLESS_MODE, proxy=proxy)
+        # Minimal warm-up
+        try:
+            driver.get("https://scholar.google.com/")
+            time.sleep(random.uniform(1.2, 1.8))
+        except Exception:
+            pass
         return driver
 
     def _is_driver_responsive(self, driver) -> bool:
@@ -583,24 +609,39 @@ class GoogleScholarDiscovery(BaseDiscovery):
         time.sleep(random.uniform(1, 2))
 
     def _navigate_to_scholar(self, driver):
-        logger.debug("Navigating to Google Scholar...")
         driver.get("https://scholar.google.com/")
-
         if not self._wait_for_page_load(driver):
             raise WebDriverException("Scholar page failed to load properly")
-
-        time.sleep(random.uniform(1.5, 1.75))
+        # Consent gets handled right after (below)
+        time.sleep(random.uniform(1.2, 1.6))
 
     def _execute_search(self, driver, query: str):
-        logger.debug("Finding search box...")
-        search_box = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.NAME, "q"))
-        )
+        # Find & type like a human; avoid programmatic submit if button disabled
+        search_box = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.NAME, "q")))
         if not search_box.is_displayed():
             raise WebDriverException("Search box is not visible")
 
-        self._paste_text(driver, search_box, query)
-        self._submit_search(driver)
+        # Clear, type with slight jitter
+        try:
+            search_box.clear()
+        except Exception:
+            pass
+
+        for chunk in [query]:  # simple, but ready for per-word typing if needed
+            search_box.send_keys(chunk)
+            time.sleep(random.uniform(0.08, 0.16))
+
+        # Prefer header button, fallback to Enter
+        try:
+            btn = driver.find_element(By.ID, "gs_hdr_tsb")
+            if not btn.is_enabled():
+                time.sleep(0.4)
+            btn.click()
+        except Exception:
+            from selenium.webdriver.common.keys import Keys
+            search_box.send_keys(Keys.ENTER)
+
+        time.sleep(random.uniform(1.8, 2.8))
 
     def _submit_search(self, driver):
         search_button = driver.find_element(By.ID, "gs_hdr_tsb")
@@ -637,11 +678,12 @@ class GoogleScholarDiscovery(BaseDiscovery):
     def _is_captcha_page(self, driver) -> bool:
         try:
             patterns = ['recaptcha', '/sorry/', 'captcha', 'unusual traffic']
-            if any(p in driver.current_url.lower() for p in patterns):
-                return True
-            if any(p in driver.title.lower() for p in patterns):
-                return True
-            return False
+            cur = (driver.current_url or "").lower()
+            title = (driver.title or "").lower()
+            hit = any(p in cur for p in patterns) or any(p in title for p in patterns)
+            if hit and hasattr(self, 'captcha_handler'):  # if wired from scraper pattern
+                self.captcha_handler.captcha_encounter_count += 1
+            return hit
         except Exception:
             return False
 
@@ -1772,7 +1814,7 @@ def main():
         first_name="Geoffrey",
         last_name="Hinton",
         affiliation="University of Toronto",
-        api_keys=api_keys,
+        api_keys= api_keys,
         verify_profiles=False
     )
 
@@ -1787,7 +1829,6 @@ def main():
             print(f"   Profile URL:  {candidate.profile_url or 'N/A'}")
     else:
         print(f"\n--- Discovery Failed ---\nError: {result.error}")
-
 
 if __name__ == "__main__":
     main()
