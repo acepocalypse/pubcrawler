@@ -162,13 +162,17 @@ def api_discover_profiles_start():
 def api_search_start():
     try:
         data = request.get_json() or {}
-        researcher_name = (data.get('researcher_name') or '').strip()
-        if not researcher_name:
-            return jsonify({'error': 'Researcher name is required'}), 400
-        parts = researcher_name.split()
-        if len(parts) < 2:
-            return jsonify({'error': 'Please provide both first and last name'}), 400
-        first_name, last_name = parts[0], ' '.join(parts[1:])
+        first_name = (data.get('first_name') or '').strip()
+        last_name = (data.get('last_name') or '').strip()
+        if not first_name or not last_name:
+            # fallback to researcher_name for legacy requests
+            researcher_name = (data.get('researcher_name') or '').strip()
+            if not researcher_name:
+                return jsonify({'error': 'First and last name are required'}), 400
+            parts = researcher_name.split()
+            if len(parts) < 2:
+                return jsonify({'error': 'Please provide both first and last name'}), 400
+            first_name, last_name = parts[0], ' '.join(parts[1:])
 
         # Build author
         affiliation = (data.get('affiliation') or '').strip()
@@ -386,20 +390,18 @@ def api_search():
         data = request.get_json()
         if not data:
             raise BadRequest("No JSON data provided")
-        
         # Extract researcher information
-        researcher_name = data.get('researcher_name', '').strip()
-        if not researcher_name:
-            return jsonify({'error': 'Researcher name is required'}), 400
-        
-        # Parse name (simple heuristic)
-        name_parts = researcher_name.split()
-        if len(name_parts) < 2:
-            return jsonify({'error': 'Please provide both first and last name'}), 400
-        
-        first_name = name_parts[0]
-        last_name = ' '.join(name_parts[1:])
-        
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        if not first_name or not last_name:
+            researcher_name = data.get('researcher_name', '').strip()
+            if not researcher_name:
+                return jsonify({'error': 'First and last name are required'}), 400
+            name_parts = researcher_name.split()
+            if len(name_parts) < 2:
+                return jsonify({'error': 'Please provide both first and last name'}), 400
+            first_name = name_parts[0]
+            last_name = ' '.join(name_parts[1:])
         # Extract other parameters
         google_scholar_id = data.get('google_scholar_id', '').strip()
         scopus_id = data.get('scopus_id', '').strip()
@@ -407,7 +409,6 @@ def api_search():
         orcid_id = data.get('orcid_id', '').strip()
         affiliation = data.get('affiliation', '').strip()
         api_keys = data.get('api_keys', {})
-        
         # Create author object
         author = Author(
             first_name=first_name,
