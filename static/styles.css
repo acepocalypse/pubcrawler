@@ -1,0 +1,232 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    background-color: #f9fafb;
+}
+.database-icon {
+    transition: all 0.2s ease;
+}
+.database-icon.active {
+    transform: scale(1.1);
+}
+.publication-row:hover {
+    background-color: #f3f4f6;
+}
+.shadow-light {
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+}
+.spinner {
+    border: 3px solid #f3f3f6;
+    border-top: 3px solid #374151;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+/* Indeterminate progress bar (matches neutral, minimal design) */
+.progress-container {
+    position: relative;
+    height: 6px;
+    background-color: #e5e7eb; /* gray-200 */
+    border-radius: 9999px;
+    overflow: hidden;
+}
+/* Determinate bar (we'll animate width) */
+.progress-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 0%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, rgba(17,24,39,0.15), rgba(17,24,39,0.85));
+    transition: width 200ms ease;
+}
+.progress-indeterminate {
+    position: absolute;
+    left: -40%;
+    top: 0;
+    height: 100%;
+    width: 40%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, rgba(17,24,39,0.15), rgba(17,24,39,0.6), rgba(17,24,39,0.15));
+    animation: indeterminate-sweep 1.1s ease-in-out infinite;
+}
+@keyframes indeterminate-sweep {
+    0% { left: -40%; }
+    100% { left: 100%; }
+}
+@media (max-width: 768px) {
+    .responsive-table th {
+        display: none;
+    }
+    .responsive-table td {
+        display: flex;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .responsive-table td::before {
+        content: attr(data-label);
+        font-weight: 500;
+        min-width: 100px;
+        padding-right: 1rem;
+        color: #4b5563;
+    }
+    .responsive-table tr {
+        display: block;
+        margin-bottom: 1rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+    }
+}
+/* --- citation box sizing/spacing --- */
+.citations-cell { min-width: 210px; }          
+.citation-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(82px, 1fr)); 
+    gap: 9px;                        
+}
+.citation-box {
+    padding: 9px 10px;                         
+    border-radius: 9px;                             
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);    
+    min-width: 82px;                                
+}
+.citation-box .count {
+    font-weight: 700;
+    font-size: 1rem;                            
+    line-height: 1.1;
+    margin-bottom: 1px;                           
+}
+.citation-box .label {
+    font-size: 0.625rem;                             
+    line-height: 1;
+    white-space: nowrap;
+    opacity: 0.9;
+}
+
+/* === Profile Discovery (modal) redesign === */
+.profile-modal .source-section-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #f9fafb;
+}
+.profile-modal .candidate-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #ffffff;
+    transition: box-shadow .15s ease, border-color .15s ease, transform .05s ease;
+    max-width: 100%; /* Prevent horizontal overflow */
+    overflow-x: hidden;
+    box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+}
+/* allow the main content column to shrink inside the card */
+.profile-modal .candidate-card > .flex-1 {
+    min-width: 0;              /* ← critical in flex layouts */
+}
+
+/* sample pubs container: no horizontal spill */
+.profile-modal .sample-pubs {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+}
+
+/* single-line ellipsis for each item */
+.profile-modal .sample-pubs li.truncate {
+    display: block;
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding-right: 0.5em;      /* optional breathing room */
+}
+
+/* now a separate, valid rule */
+.profile-modal .meta {
+    width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    min-width: 0;
+}
+
+/* --- profile modal close button --- */
+.profile-modal .close-modal {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f3f4f6;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    color: #374151;
+    font-size: 1.125rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+    z-index: 10;
+}
+.profile-modal .close-modal:hover {
+    background: #e5e7eb;
+}
+.profile-modal .close-modal:focus {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+}
+
+/* --- new profile modal badge styles --- */
+.profile-modal .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: .7rem;
+    font-weight: 600;
+    position: relative;
+    overflow: hidden;
+    height: 1.5rem;
+    white-space: nowrap;
+}
+.profile-modal .badge::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 300%;
+    height: 300%;
+    background: currentColor;
+    opacity: 0.15;
+    border-radius: 9999px;
+    transform: translate(-50%, -50%) scale(0);
+    transition: transform 0.3s ease;
+    z-index: 0;
+}
+.profile-modal .badge:hover::before {
+    transform: translate(-50%, -50%) scale(1);
+}
+.profile-modal .badge span {
+    position: relative;
+    z-index: 1;
+}
+
+@media (min-width: 640px) {
+    .profile-modal .split { grid-template-columns: 1fr auto; }
+}
