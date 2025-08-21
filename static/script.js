@@ -86,12 +86,15 @@ async function handleSearch(event) {
     hideResults();
 
     try {
+        // Split WoS IDs by comma, trim each, and filter out empty
+        const wosRaw = document.getElementById('wos-id').value.trim();
+        const wosIds = wosRaw.split(',').map(x => x.trim()).filter(Boolean);
         const searchData = {
             first_name: firstName,
             last_name: lastName,
             google_scholar_id: document.getElementById('google-scholar-id').value.trim(),
             scopus_id: document.getElementById('scopus-id').value.trim(),
-            wos_id: document.getElementById('wos-id').value.trim(),
+            wos_id: wosIds.length > 1 ? wosIds : wosRaw,
             orcid_id: document.getElementById('orcid-id').value.trim(),
             affiliation: document.getElementById('affiliation').value.trim(),
             api_keys: {
@@ -326,7 +329,7 @@ function createCandidateCard(candidate, index) {
     const pubCount = (pubCountRaw != null && !isNaN(pubCountRaw)) ? Number(pubCountRaw) : null;
     const samplePubs = candidate.sample_publications?.slice(0, 2).map(p => `<li class="truncate">• ${p}</li>`).join('') || '<li class="italic text-gray-500">No sample publications available</li>';
 
-    return `<div class="candidate-card p-3 flex gap-3 items-stretch hover:shadow-lg transition-shadow duration-150"><div class="flex flex-col items-center justify-start pt-2 pr-2"><label class="inline-flex items-center cursor-pointer select-none"><input type="checkbox" class="candidate-select h-6 w-6 text-blue-600 focus:ring-blue-500 border-gray-300 rounded transition" data-gindex="${index}"></label><div class="mt-3 w-9 h-9 rounded-full flex items-center justify-center text-white" style="background:${meta.color}"><i class="${meta.icon} text-base"></i></div></div><div class="flex-1 flex flex-col justify-between"><div><div class="flex flex-wrap items-center gap-2 mb-1"><span class="font-semibold text-gray-900 text-base">${formatName(candidate.name)}</span><span class="badge" style="background:${confMeta.bg};color:${confMeta.fg}">${confMeta.label}</span>${candidate.profile_url ? `<a href="${candidate.profile_url}" target="_blank" class="ml-1 text-blue-600 hover:text-blue-800 text-xs" title="Open profile"><i class="fas fa-external-link-alt"></i></a>` : ''}</div>${candidate.affiliation ? `<div class="meta text-sm text-gray-600 mb-1">${candidate.affiliation}</div>` : ''}</div><div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 mt-2 mb-2"><span><strong>ID:</strong> <span class="text-gray-700">${candidate.profile_id}</span></span>${pubCount != null ? `<span><strong>Publications:</strong> <span class="text-gray-700">${pubCount}${pubCountIsMin ? '+' : ''}</span></span>` : ''}</div><div class="bg-gray-50 rounded-md px-3 py-2 mt-1"><ul class="sample-pubs text-xs text-gray-700 leading-tight">${samplePubs}</ul></div></div></div>`;
+    return `<div class="candidate-card p-3 flex gap-3 items-stretch hover:shadow-lg transition-shadow duration-150"><div class="flex flex-col items-center justify-start pt-2 pr-2"><label class="inline-flex items-center cursor-pointer select-none"><input type="checkbox" class="candidate-select h-6 w-6 text-blue-600 focus:ring-blue-500 border-gray-300 rounded transition" data-gindex="${index}"></label></div><div class="flex-1 flex flex-col justify-between"><div><div class="flex flex-wrap items-center gap-2 mb-1"><span class="font-semibold text-gray-900 text-base">${formatName(candidate.name)}</span><span class="badge" style="background:${confMeta.bg};color:${confMeta.fg}">${confMeta.label}</span>${candidate.profile_url ? `<a href="${candidate.profile_url}" target="_blank" class="ml-1 text-blue-600 hover:text-blue-800 text-xs" title="Open profile"><i class="fas fa-external-link-alt"></i></a>` : ''}</div>${candidate.affiliation ? `<div class="meta text-sm text-gray-600 mb-1">${candidate.affiliation}</div>` : ''}</div><div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 mt-2 mb-2"><span><strong>ID:</strong> <span class="text-gray-700">${candidate.profile_id}</span></span>${pubCount != null ? `<span><strong>Publications:</strong> <span class="text-gray-700">${pubCount}${pubCountIsMin ? '+' : ''}</span></span>` : ''}</div><div class="bg-gray-50 rounded-md px-3 py-2 mt-1"><ul class="sample-pubs text-xs text-gray-700 leading-tight">${samplePubs}</ul></div></div></div>`;
 }
 
 // --- Filtering & Sorting ---
@@ -492,12 +495,24 @@ function updateSourceToggleVisual(el, state) {
 }
 
 function applySelectedProfiles() {
-    Object.values(selectedProfiles).forEach(p => {
-        const key = normalizeSourceKey(p.source);
-        const idMap = { google_scholar: 'google-scholar-id', scopus: 'scopus-id', wos: 'wos-id', orcid: 'orcid-id' };
-        if (idMap[key]) document.getElementById(idMap[key]).value = p.profile_id;
+    // Collect IDs for each source (support multiple per source)
+    const idMap = { google_scholar: 'google-scholar-id', scopus: 'scopus-id', wos: 'wos-id', orcid: 'orcid-id' };
+    const idsBySource = { google_scholar: [], scopus: [], wos: [], orcid: [] };
+    // Allow multiple selection for any source, not just one per source
+    Object.values(discoveredProfiles.candidates || []).forEach((candidate, idx) => {
+        const key = normalizeSourceKey(candidate.source);
+        const cb = document.querySelector(`.candidate-select[data-gindex='${idx}']`);
+        if (cb && cb.checked) {
+            idsBySource[key].push(candidate.profile_id);
+        }
     });
-    showSuccess(`Applied IDs for: ${Object.values(selectedProfiles).map(p => p.source).join(', ')}`);
+    // Set input values, joining multiple IDs with commas for all sources
+    Object.entries(idMap).forEach(([key, inputId]) => {
+        if (idsBySource[key].length) {
+            document.getElementById(inputId).value = idsBySource[key].join(', ');
+        }
+    });
+    showSuccess(`Applied IDs for: ${Object.keys(idsBySource).filter(k => idsBySource[k].length).join(', ')}`);
     closeProfileModal();
 }
 

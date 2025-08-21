@@ -106,7 +106,7 @@ MAX_DRIVER_TIMEOUT = 45
 MAX_PUBLICATION_SAMPLES = 3
 
 # Toggle headless/headful mode here
-HEADLESS_MODE = False  # Set to True for headless, False for headful
+HEADLESS_MODE = True  # Set to True for headless, False for headful
 
 # Data Models
 @dataclass

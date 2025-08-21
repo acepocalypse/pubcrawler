@@ -77,9 +77,16 @@ def _create_retry_session(max_retries: int = 3, backoff_factor: float = 1.5) -> 
 def normalize_wos_ids(wos_input):
     """Normalize WoS ID input to a list format."""
     if isinstance(wos_input, str):
-        return [wos_input]
+        # Split comma-separated string into list, trim whitespace, ignore empty
+        ids = [id_.strip() for id_ in wos_input.split(',') if id_.strip()]
+        return ids
     elif isinstance(wos_input, list):
-        return wos_input
+        # Flatten any comma-separated strings in the list
+        ids = []
+        for item in wos_input:
+            if isinstance(item, str):
+                ids.extend([id_.strip() for id_ in item.split(',') if id_.strip()])
+        return ids
     else:
         raise TypeError("WOS_AUTHOR_ID must be a string or list of strings")
 
@@ -596,9 +603,11 @@ def fetch(
     
     # Prioritize author ID search if provided
     if author_ids:
-        author_ids = normalize_wos_ids(author_ids)
-        print(f"🔍 Searching Web of Science using Author IDs: {', '.join(author_ids)}")
-        for aid in author_ids:
+        normalized_ids = normalize_wos_ids(author_ids)
+        print(f"Normalized WoS Author IDs: {normalized_ids}")
+        print(f"🔍 Searching Web of Science using Author IDs: {', '.join(normalized_ids)}")
+        for aid in normalized_ids:
+            print(f"Using WoS Author ID for API call: '{aid}'")
             try:
                 df = _wos_pipeline_single(aid, api_key, limit_per_page=50)
                 if not df.empty:

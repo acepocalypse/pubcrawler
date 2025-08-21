@@ -318,19 +318,29 @@ class OptimizedScholarScraper:
         return self.driver
         
     def _warm_up(self):
-        """Minimal browser warm-up"""
+        """Minimal browser warm-up, even quicker if headless"""
         logger.info("Quick browser warm-up...")
         try:
             self.driver.get("https://scholar.google.com")
-            self.behavior_sim.human_delay(1, 2)
-            
-            # Handle cookies if present
-            try:
-                accept_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]")
-                if accept_btn.is_displayed():
-                    accept_btn.click()
-            except:
-                pass
+            # If headless, warm up less and be quicker
+            if getattr(self, 'headless', False):
+                self.behavior_sim.human_delay(0.3, 0.7)
+                try:
+                    accept_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]")
+                    if accept_btn.is_displayed():
+                        accept_btn.click()
+                except:
+                    pass
+                # Skip any extra warm-up steps for speed
+            else:
+                self.behavior_sim.human_delay(1, 2)
+                try:
+                    accept_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]")
+                    if accept_btn.is_displayed():
+                        accept_btn.click()
+                except:
+                    pass
+                # (Add any additional warm-up steps for non-headless if needed)
         except Exception as e:
             logger.debug(f"Warm-up error (non-critical): {e}")
             

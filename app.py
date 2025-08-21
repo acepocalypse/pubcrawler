@@ -176,13 +176,19 @@ def api_search_start():
 
         # Build author
         affiliation = (data.get('affiliation') or '').strip()
+        # Handle wos_id: can be a string or a list
+        wos_id_raw = data.get('wos_id')
+        if isinstance(wos_id_raw, list):
+            wos_id = ', '.join(str(x).strip() for x in wos_id_raw if str(x).strip())
+        else:
+            wos_id = (wos_id_raw or '').strip()
         author = Author(
             first_name=first_name,
             last_name=last_name,
             affiliation=affiliation,
             gs_id=(data.get('google_scholar_id') or '').strip(),
             scopus_id=(data.get('scopus_id') or '').strip(),
-            wos_id=(data.get('wos_id') or '').strip(),
+            wos_id=wos_id,
             orcid_id=(data.get('orcid_id') or '').strip(),
         )
 
