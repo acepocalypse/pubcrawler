@@ -663,153 +663,81 @@ def _clean_response_for_json(data):
 
 
 def _format_publication(pub: Publication, all_publications: List[Publication] = None) -> Dict:
-    """Format a publication for JSON response with coverage analysis using fuzzy matching."""
+    """Format a publication for JSON response with corrected coverage and link generation."""
     import math
-    
-    # Helper function to clean values for JSON serialization
+    import re
+
     def clean_value(value):
-        if value is None:
-            return None
-        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-            return None
-        if isinstance(value, str) and value.lower() in ['nan', 'none', 'null', '']:
-            return None
+        if value is None: return None
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)): return None
+        if isinstance(value, str) and value.lower() in ['nan', 'none', 'null', '']: return None
         return value
-    
-    # Analyze coverage by looking for the same publication across sources
-    coverage = {
-        'google_scholar': False,
-        'scopus': False,
-        'wos': False,
-        'orcid': False
-    }
-    
-    # Track citations from each source
+
+    # --- Step 1: Determine Coverage from Source String ---
+    coverage = { 'google_scholar': False, 'scopus': False, 'wos': False, 'orcid': False }
     source_citations = {}
+    source_lower = (pub.source or "").lower()
+
+    gs_match = re.search(r'google scholar(?:\s*\((\d+)\s*cites?\))?', source_lower)
+    scopus_match = re.search(r'scopus(?:\s*\((\d+)\s*cites?\))?', source_lower)
+    wos_match = re.search(r'(?:web of science|wos)(?:\s*\((\d+)\s*cites?\))?', source_lower)
+    orcid_match = re.search(r'orcid(?:\s*\((\d+)\s*cites?\))?', source_lower)
+
+    if gs_match:
+        coverage['google_scholar'] = True
+        source_citations['google_scholar'] = int(gs_match.group(1)) if gs_match.group(1) else (pub.citations or 0)
+    if scopus_match:
+        coverage['scopus'] = True
+        source_citations['scopus'] = int(scopus_match.group(1)) if scopus_match.group(1) else (pub.citations or 0)
+    if wos_match:
+        coverage['wos'] = True
+        source_citations['wos'] = int(wos_match.group(1)) if wos_match.group(1) else (pub.citations or 0)
+    if orcid_match:
+        coverage['orcid'] = True
+        source_citations['orcid'] = int(orcid_match.group(1)) if orcid_match.group(1) else 0
+
+    if not any(coverage.values()):
+        if 'google scholar' in source_lower: coverage['google_scholar'] = True
+        elif 'scopus' in source_lower: coverage['scopus'] = True
+        elif 'wos' in source_lower or 'web of science' in source_lower: coverage['wos'] = True
+        elif 'orcid' in source_lower: coverage['orcid'] = True
+
+    # --- Step 2: Generate Clean, Clickable Links ---
+    final_links = []
+    seen_urls = set()
+
+    def add_link(source_name, url):
+        if url and url not in seen_urls:
+            final_links.append({"source": source_name, "url": url})
+            seen_urls.add(url)
+
+    # Scour all available URL fields to find the best possible links
+    # THIS IS THE CORRECTED LINE:
+    all_urls_to_check = [pub.url] + ([p.get('url') for p in pub.links] if hasattr(pub, 'links') and pub.links else [])
     
-    # Check if this publication has already been merged from multiple sources
-    source_lower = pub.source.lower() if pub.source else ""
-    if 'multiple sources:' in source_lower:
-        # Parse the merged sources with citation information
-        # Format: "Multiple sources: Google Scholar (45 cites), Scopus (52 cites), ORCID (0 cites)"
-        import re
+    for url in all_urls_to_check:
+        if not isinstance(url, str) or not url:
+            continue
         
-        if 'google scholar' in source_lower:
-            coverage['google_scholar'] = True
-            # Extract citation count for Google Scholar
-            match = re.search(r'google scholar \((\d+) cites?\)', source_lower)
-            if match:
-                source_citations['google_scholar'] = int(match.group(1))
-        
-        if 'scopus' in source_lower:
-            coverage['scopus'] = True
-            # Extract citation count for Scopus
-            match = re.search(r'scopus \((\d+) cites?\)', source_lower)
-            if match:
-                source_citations['scopus'] = int(match.group(1))
-        
-        if 'web of science' in source_lower or 'wos' in source_lower:
-            coverage['wos'] = True
-            # Extract citation count for Web of Science
-            match = re.search(r'(?:web of science|wos) \((\d+) cites?\)', source_lower)
-            if match:
-                source_citations['wos'] = int(match.group(1))
-        
-        if 'orcid' in source_lower:
-            coverage['orcid'] = True
-            # Extract citation count for ORCID
-            match = re.search(r'orcid \((\d+) cites?\)', source_lower)
-            if match:
-                source_citations['orcid'] = int(match.group(1))
-    else:
-        # Single source publication - mark its source and look for fuzzy matches
-        if 'google scholar' in source_lower:
-            coverage['google_scholar'] = True
-            source_citations['google_scholar'] = clean_value(pub.citations) or 0
-        elif 'scopus' in source_lower:
-            coverage['scopus'] = True
-            source_citations['scopus'] = clean_value(pub.citations) or 0
-        elif 'web of science' in source_lower or 'wos' in source_lower:
-            coverage['wos'] = True
-            source_citations['wos'] = clean_value(pub.citations) or 0
-        elif 'orcid' in source_lower:
-            coverage['orcid'] = True
-            source_citations['orcid'] = clean_value(pub.citations) or 0
-        
-        # If we have all publications, check for duplicates across sources using fuzzy matching
-        if all_publications:
-            # Find publications that match this one using multiple criteria
-            matching_pubs = []
-            
-            for other_pub in all_publications:
-                # Skip if comparing with itself
-                if pub is other_pub:
-                    continue
-                
-                # Method 1: Exact DOI match (highest priority)
-                if (pub.doi and other_pub.doi and 
-                    clean_value(pub.doi) and clean_value(other_pub.doi) and
-                    pub.doi.lower().strip() == other_pub.doi.lower().strip()):
-                    matching_pubs.append(other_pub)
-                    continue
-                
-                # Method 2: Fuzzy matching on title, authors, year, and journal
-                if _publications_match(pub, other_pub):
-                    matching_pubs.append(other_pub)
-            
-            # Check which sources have this publication and their citation counts
-            for match_pub in matching_pubs:
-                other_source_lower = match_pub.source.lower() if match_pub.source else ""
-                match_citations = clean_value(match_pub.citations) or 0
-                
-                # Handle both single sources AND already-merged sources
-                if 'multiple sources:' in other_source_lower:
-                    # Parse merged sources to extract individual source information
-                    import re
-                    
-                    if 'google scholar' in other_source_lower and not coverage['google_scholar']:
-                        coverage['google_scholar'] = True
-                        # Extract citation count for Google Scholar
-                        match = re.search(r'google scholar \((\d+) cites?\)', other_source_lower)
-                        if match:
-                            source_citations['google_scholar'] = int(match.group(1))
-                    
-                    if 'scopus' in other_source_lower and not coverage['scopus']:
-                        coverage['scopus'] = True
-                        # Extract citation count for Scopus
-                        match = re.search(r'scopus \((\d+) cites?\)', other_source_lower)
-                        if match:
-                            source_citations['scopus'] = int(match.group(1))
-                    
-                    if ('web of science' in other_source_lower or 'wos' in other_source_lower) and not coverage['wos']:
-                        coverage['wos'] = True
-                        # Extract citation count for Web of Science
-                        match = re.search(r'(?:web of science|wos) \((\d+) cites?\)', other_source_lower)
-                        if match:
-                            source_citations['wos'] = int(match.group(1))
-                    
-                    if 'orcid' in other_source_lower and not coverage['orcid']:
-                        coverage['orcid'] = True
-                        # Extract citation count for ORCID
-                        match = re.search(r'orcid \((\d+) cites?\)', other_source_lower)
-                        if match:
-                            source_citations['orcid'] = int(match.group(1))
-                else:
-                    # Handle single sources
-                    if 'google scholar' in other_source_lower and not coverage['google_scholar']:
-                        coverage['google_scholar'] = True
-                        source_citations['google_scholar'] = match_citations
-                    elif 'scopus' in other_source_lower and not coverage['scopus']:
-                        coverage['scopus'] = True
-                        source_citations['scopus'] = match_citations
-                    elif ('web of science' in other_source_lower or 'wos' in other_source_lower) and not coverage['wos']:
-                        coverage['wos'] = True
-                        source_citations['wos'] = match_citations
-                    elif 'orcid' in other_source_lower and not coverage['orcid']:
-                        coverage['orcid'] = True
-                        source_citations['orcid'] = match_citations
-    
-    # Ensure all sources have a citation count (0 if not available)
+        if "scholar.google.com" in url:
+            add_link("Google Scholar", url)
+        elif "scopus.com" in url:
+            add_link("Scopus", url)
+        elif "webofscience.com" in url or "gateway.clarivate.com" in url:
+            wos_ut_match = re.search(r'KeyUT=(WOS:\d+)', url)
+            if wos_ut_match:
+                public_wos_url = f"https://www.webofscience.com/wos/woscc/full-record/{wos_ut_match.group(1)}"
+                add_link("Web of Science", public_wos_url)
+            else:
+                 add_link("Web of Science", url)
+        elif "orcid.org" in url:
+            orcid_id_match = re.search(r'(\d{4}-\d{4}-\d{4}-\d{3}[\dX])', url)
+            if orcid_id_match:
+                 add_link("ORCID", f"https://orcid.org/{orcid_id_match.group(1)}")
+            else:
+                 add_link("ORCID", url)
+                 
+    # --- Step 3: Finalize Publication Object for Frontend ---
     standardized_citations = {
         'google_scholar': source_citations.get('google_scholar', 0 if coverage['google_scholar'] else None),
         'scopus': source_citations.get('scopus', 0 if coverage['scopus'] else None),
@@ -817,30 +745,24 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         'orcid': source_citations.get('orcid', 0 if coverage['orcid'] else None)
     }
     
-    # Calculate maximum citations from all available sources
-    max_citations = max([count for count in standardized_citations.values() if count is not None], default=0)
-    
-    # Clean and format all values for JSON
+    max_citations = max([c for c in standardized_citations.values() if c is not None], default=0)
+
     formatted_pub = {
         'title': clean_value(pub.title) or "",
         'authors': pub.authors if isinstance(pub.authors, list) else [],
         'journal': clean_value(pub.journal),
         'year': clean_value(pub.year),
         'doi': clean_value(pub.doi),
-        'citations': max_citations,  # Use the highest citation count as the main citation metric
+        'citations': max_citations,
         'source': clean_value(pub.source) or "Unknown",
         'url': clean_value(pub.url),
         'coverage': coverage,
-        'source_citations': standardized_citations,  # Always provide standardized citation data
-        'links': pub.links if hasattr(pub, 'links') else [],
+        'source_citations': standardized_citations,
+        'links': final_links,
+        'coverage_count': sum(1 for v in coverage.values() if v)
     }
     
-    # Calculate total unique coverage
-    total_coverage = sum(1 for covered in coverage.values() if covered)
-    formatted_pub['coverage_count'] = total_coverage
-    
     return formatted_pub
-
 
 def _export_to_csv(publications_data: List[Dict], researcher_info: Dict = None) -> str:
     """Export publications to CSV format."""

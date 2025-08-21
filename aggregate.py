@@ -467,17 +467,36 @@ def _merge_publications(publications: List[Publication]) -> Publication:
     aggregated_sources: Dict[str, int] = {}
     links: List[dict] = []
     seen_links = set()
+    all_urls = []
+
     for p in sorted_pubs:
         # Collect source/citation info
         for source, cites in _extract_source_map(p).items():
             aggregated_sources[source] = max(aggregated_sources.get(source, 0), cites)
-        # Collect source-specific URLs
         norm_source = _normalize_source_label(p.source)
+        
+        # 1. Add the main URL if it exists
         if p.url and norm_source:
             key = (norm_source, p.url)
             if key not in seen_links:
-                links.append({"url": p.url, "source": norm_source})
+                link_info = {"url": p.url, "source": norm_source}
+                links.append(link_info)
+                all_urls.append(p.url)
                 seen_links.add(key)
+
+        # 2. Add URLs from the 'links' list, which is where WoS URLs are stored
+        if hasattr(p, 'links') and p.links:
+            for link in p.links:
+                # The link can be a string or a dict
+                url_to_add = link if isinstance(link, str) else link.get('url')
+                source_of_link = norm_source or (link.get('source') if isinstance(link, dict) else 'Unknown')
+                
+                if url_to_add and source_of_link:
+                    key = (source_of_link, url_to_add)
+                    if key not in seen_links:
+                        links.append({"url": url_to_add, "source": source_of_link})
+                        all_urls.append(url_to_add)
+                        seen_links.add(key)
 
     # Build a deterministic, human-readable source string
     source_order = ["Google Scholar", "Scopus", "Web of Science", "ORCID"]
@@ -492,7 +511,17 @@ def _merge_publications(publications: List[Publication]) -> Publication:
     merged_authors = max((p.authors for p in sorted_pubs), key=lambda x: len(x or []), default=[])
     merged_journal = next((p.journal for p in sorted_pubs if p.journal), None)
     merged_year = next((p.year for p in sorted_pubs if p.year), None)
-    merged_url = next((p.url for p in sorted_pubs if p.url), None)
+    
+    # Choose the best URL for the main 'url' field - prefer direct links over API/profile links
+    def score_url(url):
+        if "doi.org" in url: return 4
+        if "scopus.com/record" in url: return 3
+        if "webofscience.com/wos" in url: return 3
+        if "scholar.google.com/citations?view_op=view_citation" in url: return 3
+        if "orcid.org" in url and "0000-" in url: return 1 # Lower score for profile URLs
+        return 2
+
+    merged_url = max(all_urls, key=score_url, default=next((p.url for p in sorted_pubs if p.url), None))
 
     # Select the most common, non-null DOI
     dois = [_normalize_doi(p.doi) for p in sorted_pubs if _normalize_doi(p.doi)]
