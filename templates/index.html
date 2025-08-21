@@ -148,19 +148,68 @@
             border-radius: 12px;
             background: #ffffff;
             transition: box-shadow .15s ease, border-color .15s ease, transform .05s ease;
+            max-width: 100%; /* Prevent horizontal overflow */
+            overflow-x: hidden;
+            box-sizing: border-box;
         }
-        .profile-modal .candidate-card:hover {
-            box-shadow: 0 6px 20px rgba(0,0,0,.06);
+        .profile-modal .candidate-card .bg-gray-50 {
+            max-width: 100%; /* Ensure sample pubs container doesn't overflow */
+            overflow-x: hidden;
         }
-        .profile-modal .candidate-card.selected {
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59,130,246,.15);
-            background: #f8fbff;
+        .profile-modal .sample-pubs {
+            margin-top: .5rem;
+            max-height: 84px;
+            overflow-y: auto;
+            padding-right: 0;
+            width: 100%;
+            max-width: 100%;
+            overflow-x: hidden;
         }
-        .profile-modal .meta {
-            color: #6b7280; /* gray-500 */
+        .profile-modal .sample-pubs li {
+            color: #4b5563; /* gray-600 */
             font-size: .85rem;
+            line-height: 1.25rem;
+            margin-bottom: .25rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%; /* Prevent overflow */
+            display: block;
+            padding-right: 0.5em;
+            box-sizing: border-box;
+            word-break: break-word; /* Allow breaking long words */
+            background: none;
         }
+
+        /* --- profile modal close button --- */
+        .profile-modal .close-modal {
+          position: absolute;
+          top: 1rem;
+          right: 1rem;
+          width: 2.5rem;
+          height: 2.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #f3f4f6;
+          border: 2px solid transparent;
+          border-radius: 9999px;
+          color: #374151;
+          font-size: 1.125rem;
+          line-height: 1;
+          cursor: pointer;
+          transition: background 0.2s ease, transform 0.2s ease;
+          z-index: 10;
+        }
+        .profile-modal .close-modal:hover {
+          background: #e5e7eb;
+        }
+        .profile-modal .close-modal:focus {
+          outline: 2px solid #3b82f6;
+          outline-offset: 2px;
+        }
+
+        /* --- new profile modal badge styles --- */
         .profile-modal .badge {
             display: inline-flex;
             align-items: center;
@@ -168,31 +217,33 @@
             border-radius: 9999px;
             font-size: .7rem;
             font-weight: 600;
-        }
-        .profile-modal .sample-pubs {
-            margin-top: .5rem;
-            max-height: 84px;
-            overflow-y: auto;
-            /* Ensure contained inside card, no overflow */
-            padding-right: 0;
-        }
-        .profile-modal .sample-pubs li {
-            color: #4b5563; /* gray-600 */
-            font-size: .85rem;
-            line-height: 1.25rem;
-            margin-bottom: .25rem;
-            /* Truncate to one line with ellipsis */
-            white-space: nowrap;
+            position: relative;
             overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 100%;
-            display: block;
+            height: 1.5rem;
+            white-space: nowrap;
         }
-        .profile-modal .split {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 12px;
+        .profile-modal .badge::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 300%;
+            height: 300%;
+            background: currentColor;
+            opacity: 0.15;
+            border-radius: 9999px;
+            transform: translate(-50%, -50%) scale(0);
+            transition: transform 0.3s ease;
+            z-index: 0;
         }
+        .profile-modal .badge:hover::before {
+            transform: translate(-50%, -50%) scale(1);
+        }
+        .profile-modal .badge span {
+            position: relative;
+            z-index: 1;
+        }
+
         @media (min-width: 640px) {
             .profile-modal .split { grid-template-columns: 1fr auto; }
         }

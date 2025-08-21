@@ -95,7 +95,7 @@ MAX_DRIVER_TIMEOUT = 45
 MAX_PUBLICATION_SAMPLES = 3
 
 # Toggle headless/headful mode here
-HEADLESS_MODE = False  # Set to True for headless, False for headful
+HEADLESS_MODE = True  # Set to True for headless, False for headful
 
 # Data Models
 @dataclass
@@ -397,6 +397,13 @@ class GoogleScholarDiscovery(BaseDiscovery):
 
             try:
                 driver = self._create_and_setup_driver(proxy)
+
+                # --- NEW: Wait for page load before responsiveness check ---
+                try:
+                    self._wait_for_page_load(driver, timeout=12)
+                    time.sleep(random.uniform(0.5, 1.0))  # Short warm-up
+                except Exception:
+                    pass
 
                 if not self._is_driver_responsive(driver):
                     raise WebDriverException("Driver is not responsive")
@@ -1814,7 +1821,7 @@ def main():
         first_name="Geoffrey",
         last_name="Hinton",
         affiliation="University of Toronto",
-        api_keys= api_keys,
+               api_keys= api_keys,
         verify_profiles=False
     )
 
