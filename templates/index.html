@@ -151,34 +151,39 @@
             max-width: 100%; /* Prevent horizontal overflow */
             overflow-x: hidden;
             box-sizing: border-box;
+                width: 100%;
+                min-width: 0;
         }
-        .profile-modal .candidate-card .bg-gray-50 {
-            max-width: 100%; /* Ensure sample pubs container doesn't overflow */
-            overflow-x: hidden;
+        /* allow the main content column to shrink inside the card */
+        .profile-modal .candidate-card > .flex-1 {
+            min-width: 0;              /* ← critical in flex layouts */
         }
+
+        /* sample pubs container: no horizontal spill */
         .profile-modal .sample-pubs {
-            margin-top: .5rem;
-            max-height: 84px;
-            overflow-y: auto;
-            padding-right: 0;
+            overflow-x: hidden;
             width: 100%;
             max-width: 100%;
-            overflow-x: hidden;
         }
-        .profile-modal .sample-pubs li {
-            color: #4b5563; /* gray-600 */
-            font-size: .85rem;
-            line-height: 1.25rem;
-            margin-bottom: .25rem;
-            white-space: nowrap;
+
+        /* single-line ellipsis for each item */
+        .profile-modal .sample-pubs li.truncate {
+            display: block;
+            white-space: nowrap !important;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 100%; /* Prevent overflow */
-            display: block;
-            padding-right: 0.5em;
+            width: 100%;
+            max-width: 100%;
             box-sizing: border-box;
-            word-break: break-word; /* Allow breaking long words */
-            background: none;
+            padding-right: 0.5em;      /* optional breathing room */
+        }
+
+        /* now a separate, valid rule */
+        .profile-modal .meta {
+            width: 100%;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            min-width: 0;
         }
 
         /* --- profile modal close button --- */

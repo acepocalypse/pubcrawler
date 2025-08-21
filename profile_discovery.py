@@ -56,6 +56,17 @@ try:
         uc.Chrome._original_quit = uc.Chrome.quit
         uc.Chrome.quit = _patched_quit
 
+    # Suppress "could not detect version_main" warning from undetected_chromedriver
+    import logging as _logging
+    _uc_logger = _logging.getLogger("undetected_chromedriver")
+    class _UCSuppressFilter(_logging.Filter):
+        def filter(self, record):
+            msg = str(record.getMessage())
+            if "could not detect version_main" in msg:
+                return False
+            return True
+    _uc_logger.addFilter(_UCSuppressFilter())
+
 except ImportError:
     SCRAPING_DEPS_AVAILABLE = False
 
