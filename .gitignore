@@ -36,6 +36,8 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+.gs_search_cookies.json
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
