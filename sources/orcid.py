@@ -1,3 +1,16 @@
+def normalize_orcid_ids(orcid_input):
+    """Normalize ORCID ID input to a list format."""
+    if isinstance(orcid_input, str):
+        ids = [id_.strip() for id_ in orcid_input.split(',') if id_.strip()]
+        return ids
+    elif isinstance(orcid_input, list):
+        ids = []
+        for item in orcid_input:
+            if isinstance(item, str):
+                ids.extend([id_.strip() for id_ in item.split(',') if id_.strip()])
+        return ids
+    else:
+        raise TypeError("orcid_id must be a string or list of strings")
 """pubcrawler.sources.orcid
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 ORCID harvesting module for the **pubcrawler** pipeline.
@@ -350,55 +363,47 @@ def fetch(
     if not client_id or not client_secret:
         raise ValueError("ORCID client credentials are required. Provide them as parameters or set ORCID_CLIENT_ID and ORCID_CLIENT_SECRET environment variables.")
     
-    print(f"Fetching ORCID data for ID: {orcid_id}")
-    
-    # Initialize ORCID client
+    all_works = []
+    normalized_ids = normalize_orcid_ids(orcid_id)
+    print(f"[DEBUG] Normalized ORCID IDs: {normalized_ids}")
     client = ORCIDClient(client_id, client_secret)
-    
-    try:
-        # Get works from ORCID
-        works = client.get_works(orcid_id)
-        
-        if not works:
-            print(f"No works found for ORCID ID: {orcid_id}")
-            return []
-        
-        print(f"Found {len(works)} works from ORCID")
-        
-        # Limit results if specified
-        if max_records and len(works) > max_records:
-            works = works[:max_records]
-            print(f"Limited to {max_records} works")
-        
-        # Convert to canonical format
-        canonical_works = _orcid_to_canonical(works)
-        
-        # Convert to Publication objects
-        publications = []
-        for work_data in canonical_works:
-            publications.append(
-                Publication(
-                    title=work_data['title'],
-                    authors=work_data['authors'],
-                    journal=work_data['journal'],
-                    year=work_data['year'],
-                    doi=work_data['doi'],
-                    issn=work_data['issn'],
-                    source=work_data['source'],
-                    citations=work_data['citations'],
-                    url=work_data['url']
-                )
+    for oid in normalized_ids:
+        print(f"[DEBUG] Using ORCID ID for API call: '{oid}'")
+        try:
+            works = client.get_works(oid)
+            if not works:
+                print(f"No works found for ORCID ID: {oid}")
+                continue
+            print(f"Found {len(works)} works from ORCID for {oid}")
+            if max_records and len(works) > max_records:
+                works = works[:max_records]
+                print(f"Limited to {max_records} works for {oid}")
+            all_works.extend(works)
+        except Exception as e:
+            print(f"❌ Error fetching from ORCID for {oid}: {e}")
+            continue
+    if not all_works:
+        print("No works found for provided ORCID IDs.")
+        return []
+    canonical_works = _orcid_to_canonical(all_works)
+    publications = []
+    for work_data in canonical_works:
+        publications.append(
+            Publication(
+                title=work_data['title'],
+                authors=work_data['authors'],
+                journal=work_data['journal'],
+                year=work_data['year'],
+                doi=work_data['doi'],
+                issn=work_data['issn'],
+                source=work_data['source'],
+                citations=work_data['citations'],
+                url=work_data['url']
             )
-        
-        # Sort by year (descending) then by title
-        publications.sort(key=lambda p: (-(p.year or 0), p.title or ''))
-        
-        print(f"✅ Successfully processed {len(publications)} publications from ORCID")
-        return publications
-        
-    except Exception as e:
-        print(f"❌ Error fetching from ORCID: {e}")
-        raise
+        )
+    publications.sort(key=lambda p: (-(p.year or 0), p.title or ''))
+    print(f"✅ Successfully processed {len(publications)} publications from ORCID")
+    return publications
 
 
 # ---------------------------------------------------------------------------

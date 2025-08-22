@@ -1,3 +1,17 @@
+from __future__ import annotations
+def normalize_scopus_ids(scopus_input):
+    """Normalize Scopus ID input to a list format."""
+    if isinstance(scopus_input, str):
+        ids = [id_.strip() for id_ in scopus_input.split(',') if id_.strip()]
+        return ids
+    elif isinstance(scopus_input, list):
+        ids = []
+        for item in scopus_input:
+            if isinstance(item, str):
+                ids.extend([id_.strip() for id_ in item.split(',') if id_.strip()])
+        return ids
+    else:
+        raise TypeError("scopus_id must be a string or list of strings")
 """pubcrawler.sources.scopus
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Scopus harvesting module for the **pubcrawler** pipeline.
@@ -11,8 +25,6 @@ Scopus harvesting module for the **pubcrawler** pipeline.
       (see models.Publication).
     • Returns `List[Publication]` ready for aggregation.
 """
-
-from __future__ import annotations
 
 import re
 import time
@@ -253,23 +265,36 @@ def fetch(
         Number of results to fetch per API call.
     """
     # Determine search strategy
+    all_dfs = []
+    # Handle multiple Scopus IDs
     if scopus_id and api_key:
-        raw_df = _query_scopus_by_id(scopus_id, api_key, page_batch)
+        normalized_ids = normalize_scopus_ids(scopus_id)
+        print(f"[DEBUG] Normalized Scopus IDs: {normalized_ids}")
+        for sid in normalized_ids:
+            print(f"[DEBUG] Using Scopus ID for API call: '{sid}'")
+            raw_df = _query_scopus_by_id(sid, api_key, page_batch)
+            if not raw_df.empty:
+                raw_df['scopus_id'] = sid
+                all_dfs.append(raw_df)
     elif orcid_id and api_key:
         raw_df = _query_scopus_by_orcid(orcid_id, api_key, page_batch)
+        if not raw_df.empty:
+            all_dfs.append(raw_df)
     # elif first_name and last_name and api_key:
     #     raw_df = _query_scopus_by_name(first_name, last_name, affiliation, api_key, page_batch)
     else:
         print("Error: Insufficient parameters for Scopus search")
         return []
 
-    # --- clean / standardise ---------------------------------------------
-    canon_df = _scopus_to_canonical(raw_df)
+    if not all_dfs:
+        print("No works found for provided Scopus IDs.")
+        return []
 
-    # --- map into dataclass ----------------------------------------------
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    canon_df = _scopus_to_canonical(combined_df)
+
     pubs: List[Publication] = []
     for _, row in canon_df.iterrows():
-        # If we have a Scopus EID, build the public-facing URL
         scopus_eid = getattr(row, 'scopus_pub_id', None) or row.get('scopus_pub_id', None)
         public_url = None
         if scopus_eid:
