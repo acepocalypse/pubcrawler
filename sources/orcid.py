@@ -1,16 +1,3 @@
-def normalize_orcid_ids(orcid_input):
-    """Normalize ORCID ID input to a list format."""
-    if isinstance(orcid_input, str):
-        ids = [id_.strip() for id_ in orcid_input.split(',') if id_.strip()]
-        return ids
-    elif isinstance(orcid_input, list):
-        ids = []
-        for item in orcid_input:
-            if isinstance(item, str):
-                ids.extend([id_.strip() for id_ in item.split(',') if id_.strip()])
-        return ids
-    else:
-        raise TypeError("orcid_id must be a string or list of strings")
 """pubcrawler.sources.orcid
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 ORCID harvesting module for the **pubcrawler** pipeline.
@@ -52,7 +39,19 @@ __all__ = ["fetch"]
 # ---------------------------------------------------------------------------
 # 1) ORCID API Client
 # ---------------------------------------------------------------------------
-
+def normalize_orcid_ids(orcid_input):
+    """Normalize ORCID ID input to a list format."""
+    if isinstance(orcid_input, str):
+        ids = [id_.strip() for id_ in orcid_input.split(',') if id_.strip()]
+        return ids
+    elif isinstance(orcid_input, list):
+        ids = []
+        for item in orcid_input:
+            if isinstance(item, str):
+                ids.extend([id_.strip() for id_ in item.split(',') if id_.strip()])
+        return ids
+    else:
+        raise TypeError("orcid_id must be a string or list of strings")
 class ORCIDClient:
     """ORCID API client with OAuth2 authentication."""
     
