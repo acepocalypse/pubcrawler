@@ -81,9 +81,14 @@ async function handleSearch(event) {
         return;
     }
 
+
     setLoadingState(true, 'search');
     hideError();
     hideResults();
+    // Reset filters and clear table before new search
+    clearFilters();
+    const tableBody = document.getElementById('publications-table-body');
+    if (tableBody) tableBody.innerHTML = '';
 
     try {
         // Split WoS IDs by comma, trim each, and filter out empty

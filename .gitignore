@@ -337,3 +337,5 @@ temp_*.py
 .chrome-discovery-profile/ShaderCache/index
 .chrome-discovery-profile/Subresource Filter/Indexed Rules/37/9.58.0/Ruleset Data
 .chrome-discovery-profile/ZxcvbnData/3/ranked_dicts
+.gs_search_cookies.json
+.gs_search_cookies.json
