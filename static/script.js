@@ -217,6 +217,19 @@ function displayResults(data) {
     if (data.researcher.orcid_id) infoParts.push(`ORCID ID: ${data.researcher.orcid_id}`);
     document.getElementById('researcher-info').textContent = infoParts.join(' • ');
 
+    // Populate new summary cards
+    const pubs = data.publications || [];
+    const totalPubs = pubs.length;
+    const avgCoverage = data.summary?.coverage_report?.average_coverage || 0;
+    const fullyCovered = pubs.filter(p => p.coverage_count === 4).length;
+    const gaps = totalPubs - fullyCovered;
+
+    document.getElementById('summary-total-pubs').textContent = totalPubs;
+    document.getElementById('summary-avg-coverage').textContent = `${Math.round(avgCoverage * 100)}%`;
+    document.getElementById('summary-fully-covered').textContent = fullyCovered;
+    document.getElementById('summary-gaps').textContent = gaps;
+
+    // Populate old summary line (can be removed later if redundant)
     document.getElementById('total-publications').textContent = data.summary.total_publications;
     document.getElementById('sources-used').textContent = data.summary.sources_used.join(', ');
     document.getElementById('average-coverage').textContent = `${Math.round((data.summary.coverage_report?.average_coverage || 0) * 100)}%`;

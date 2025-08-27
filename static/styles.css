@@ -230,3 +230,21 @@ body {
 @media (min-width: 640px) {
     .profile-modal .split { grid-template-columns: 1fr auto; }
 }
+
+/* --- Summary Cards --- */
+.summary-card {
+    transition: all 0.2s ease-in-out;
+}
+
+.summary-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.07);
+}
+
+.summary-card .summary-icon {
+    transition: transform 0.3s ease;
+}
+
+.summary-card:hover .summary-icon {
+    transform: rotate(-10deg) scale(1.1);
+}
