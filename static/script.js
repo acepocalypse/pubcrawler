@@ -243,6 +243,51 @@ function displayResults(data) {
     initializeFilterEventListeners();
     applyFilters();
 
+    // Rebuild researcher info as compact chips for clarity
+    try {
+        const infoContainer = document.getElementById('researcher-info');
+        while (infoContainer.firstChild) infoContainer.removeChild(infoContainer.firstChild);
+        const addChip = (label, value, iconClass, color) => {
+            if (!value) return;
+            const chip = document.createElement('div');
+            chip.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs bg-gray-100 text-gray-700';
+            chip.title = `${label}: ${value}`;
+            if (iconClass) {
+                const iconWrap = document.createElement('span');
+                iconWrap.className = 'w-4 h-4 rounded-full flex items-center justify-center mr-1.5';
+                if (color) iconWrap.style.backgroundColor = color;
+                const icon = document.createElement('i');
+                icon.className = iconClass + ' text-white text-[10px]';
+                iconWrap.appendChild(icon);
+                chip.appendChild(iconWrap);
+            }
+            const labelEl = document.createElement('span');
+            labelEl.className = 'font-medium mr-1';
+            labelEl.textContent = label;
+            chip.appendChild(labelEl);
+            const valEl = document.createElement('span');
+            valEl.className = 'text-gray-700';
+            valEl.textContent = value;
+            chip.appendChild(valEl);
+            infoContainer.appendChild(chip);
+        };
+        const r = data.researcher || {};
+        if (r.affiliation) addChip('Affiliation', r.affiliation, 'fas fa-building', '#9ca3af');
+        const pushIds = (key, raw, labelOverride) => {
+            if (!raw) return;
+            const meta = SOURCE_META[key];
+            const arr = Array.isArray(raw) ? raw : String(raw).split(',');
+            arr.map(s => String(s).trim()).filter(Boolean).forEach(id => {
+                const lbl = labelOverride || meta.name;
+                addChip(lbl, id, meta.icon, meta.color);
+            });
+        };
+        pushIds('google_scholar', r.gs_id, 'GS');
+        pushIds('scopus', r.scopus_id, 'Scopus');
+        pushIds('wos', r.wos_id, 'WoS');
+        pushIds('orcid', r.orcid_id, 'ORCID');
+    } catch (e) { /* non-fatal UI enhancement */ }
+
     resultsSection.classList.remove('hidden');
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

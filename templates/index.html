@@ -245,20 +245,24 @@
 
         <!-- Results Section -->
         <section id="results-section" class="hidden">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-                <div>
-                    <h3 class="text-xl font-light mb-2">
-                        Publications for: <span class="font-medium" id="researcher-display-name">-</span>
-                    </h3>
-                    <p class="text-gray-500 text-sm" id="researcher-info"></p>
-                </div>
-                <div class="flex space-x-3 mt-4 md:mt-0">
-                    <button id="export-csv" class="text-sm px-4 py-2 border border-gray-300 rounded-lg flex items-center hover:bg-gray-50">
-                        <i class="fas fa-download mr-2"></i> Export CSV
-                    </button>
-                    <button id="print-btn" class="text-sm px-4 py-2 border border-gray-300 rounded-lg flex items-center hover:bg-gray-50">
-                        <i class="fas fa-print mr-2"></i> Print
-                    </button>
+            <!-- Profile Header -->
+            <div class="bg-white rounded-xl shadow-light px-5 py-4 mb-6">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div>
+                        <h3 class="text-2xl font-light tracking-tight">
+                            Publications for <span class="font-semibold" id="researcher-display-name">-</span>
+                        </h3>
+                        <!-- Chips container for affiliation and IDs -->
+                        <div id="researcher-info" class="mt-2 flex flex-wrap items-center gap-2"></div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="export-csv" class="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 flex items-center">
+                            <i class="fas fa-download mr-2"></i> Export
+                        </button>
+                        <button id="print-btn" class="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 flex items-center">
+                            <i class="fas fa-print mr-2"></i> Print
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -307,7 +311,7 @@
             </div>
 
             <!-- Simplified Filters -->
-            <div class="bg-white rounded-lg p-4 mb-6 shadow-light">
+            <div class="bg-white rounded-xl p-4 mb-6 shadow-light">
                 <div class="flex flex-wrap gap-4 items-center justify-between">
                     <div class="flex flex-wrap gap-4 items-center">
                         <!-- Search Filter -->
