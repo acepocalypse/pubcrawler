@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Publication Report for {{ report.researcher.name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        @media print {
+            body {
+                font-size: 10pt;
+            }
+            .no-print {
+                display: none;
+            }
+            .page-break {
+                page-break-before: always;
+            }
+            .publication-item {
+                page-break-inside: avoid;
+            }
+            .chart-container {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto max-w-4xl bg-white shadow-lg my-8 p-8 md:p-12">
+
+        <!-- Header -->
+        <header class="border-b pb-6 mb-8">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h1 class="text-4xl font-bold text-gray-800">{{ report.researcher.name }}</h1>
+                    {% if report.researcher.affiliation %}
+                    <p class="text-xl text-gray-600 mt-2">{{ report.researcher.affiliation }}</p>
+                    {% endif %}
+                </div>
+                <div class="text-right">
+                    <div class="flex items-center justify-end text-gray-700">
+                         <i class="fas fa-book-open text-gray-700 mr-2"></i>
+                        <span class="font-light text-xl">Pub<span class="font-semibold">Crawler</span></span>
+                    </div>
+                     <p class="text-xs text-gray-500 mt-2">Report generated on {{ report.researcher.search_timestamp | tojson | fromjson | replace('T', ' ') | slice(0, 19) }}</p>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <!-- Summary Stats -->
+            <section class="mb-10">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Summary</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <p class="text-3xl font-bold text-gray-800">{{ report.summary.unique_publications }}</p>
+                        <p class="text-sm text-gray-600">Unique Publications</p>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <p class="text-3xl font-bold text-gray-800">{{ report.summary.coverage_report.summary.total_citations }}</p>
+                        <p class="text-sm text-gray-600">Total Citations</p>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <p class="text-3xl font-bold text-gray-800">{{ (report.summary.coverage_report.average_coverage * 100) | round | int }}%</p>
+                        <p class="text-sm text-gray-600">Avg. Coverage</p>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <p class="text-3xl font-bold text-gray-800">{{ report.summary.sources_used | length }}</p>
+                        <p class="text-sm text-gray-600">Sources Queried</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analytics Charts -->
+            <section class="mb-10 chart-container">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Analytics</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div class="bg-white rounded-lg p-4">
+                        <h3 class="text-lg font-medium text-gray-800 mb-3 text-center">Publications by Year</h3>
+                        <div style="height: 250px;"><canvas id="publicationsByYearChart"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4">
+                        <h3 class="text-lg font-medium text-gray-800 mb-3 text-center">Top Publication Venues</h3>
+                        <div style="height: 250px;"><canvas id="topVenuesChart"></canvas></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Publication List -->
+            <section class="page-break">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Publication List</h2>
+                <div class="space-y-4">
+                    {% for pub in report.publications | sort(attribute='year', reverse=True) %}
+                    <div class="publication-item border-t pt-4">
+                        <p class="font-semibold text-gray-800">{{ pub.title }}</p>
+                        <p class="text-sm text-gray-600 mt-1">{{ pub.authors | join(', ') }}</p>
+                        <div class="flex items-center text-sm text-gray-500 mt-2">
+                            <span>{{ pub.journal }}</span>
+                            <span class="mx-2 font-bold">&middot;</span>
+                            <span>{{ pub.year }}</span>
+                            {% if pub.doi %}
+                            <span class="mx-2 font-bold">&middot;</span>
+                            <span>DOI: <a href="https://doi.org/{{ pub.doi }}" class="text-blue-600 hover:underline">{{ pub.doi }}</a></span>
+                            {% endif %}
+                            <span class="mx-2 font-bold">&middot;</span>
+                            <span class="font-bold">{{ pub.citations }} Citations</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+        </main>
+
+        <!-- Print Button -->
+        <div class="text-center mt-12 no-print">
+            <button onclick="window.print()" class="bg-gray-800 text-white px-6 py-2 rounded-lg hover:bg-gray-700 transition">
+                <i class="fas fa-print mr-2"></i> Print Report
+            </button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const reportData = JSON.parse('{{ report_json | safe }}');
+            const publications = reportData.publications || [];
+
+            if (publications.length === 0) return;
+
+            // --- Data Processing ---
+            const currentYear = new Date().getFullYear();
+            const minYear = publications.reduce((min, p) => (p.year && p.year < min) ? p.year : min, currentYear);
+
+            const pubsByYear = {};
+            for (let y = minYear; y <= currentYear; y++) pubsByYear[y] = 0;
+            publications.forEach(p => {
+                if (p.year && p.year >= minYear) pubsByYear[p.year] = (pubsByYear[p.year] || 0) + 1;
+            });
+
+            const venueCounts = publications.reduce((acc, p) => {
+                if (p.journal) {
+                    const journal = p.journal.trim();
+                    acc[journal] = (acc[journal] || 0) + 1;
+                }
+                return acc;
+            }, {});
+            const topVenues = Object.entries(venueCounts)
+                .sort(([, a], [, b]) => b - a)
+                .slice(0, 7);
+
+            // --- Chart Rendering ---
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: true, ticks: { precision: 0 } }
+                }
+            };
+
+            // Pubs by Year Chart
+            new Chart(document.getElementById('publicationsByYearChart'), {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(pubsByYear),
+                    datasets: [{
+                        label: 'Publications',
+                        data: Object.values(pubsByYear),
+                        backgroundColor: 'rgba(31, 41, 55, 0.8)'
+                    }]
+                },
+                options: chartOptions
+            });
+
+            // Top Venues Chart
+            new Chart(document.getElementById('topVenuesChart'), {
+                type: 'bar',
+                data: {
+                    labels: topVenues.map(v => v[0]),
+                    datasets: [{
+                        label: 'Count',
+                        data: topVenues.map(v => v[1]),
+                        backgroundColor: 'rgba(16, 185, 129, 0.8)'
+                    }]
+                },
+                options: { ...chartOptions, indexAxis: 'y' }
+            });
+        });
+    </script>
+</body>
+</html>
