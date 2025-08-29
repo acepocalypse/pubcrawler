@@ -53,8 +53,11 @@ if [ ! -d "venv" ]; then
     fi
 fi
 
+# Generate a random port
+port=$((RANDOM % 64511 + 1024))
+
 # Start the web server
-echo "✅ Starting web server on http://localhost:5000"
+echo "✅ Starting web server on http://localhost:$port"
 echo ""
 echo "💡 Tips:"
 echo "   • The browser should open automatically"
@@ -62,4 +65,4 @@ echo "   • Use Ctrl+C to stop the server"
 echo "   • Check WEB_README.md for more information"
 echo ""
 
-$PYTHON_CMD run_web.py --host 127.0.0.1 --port 5000
+$PYTHON_CMD run_web.py --host 127.0.0.1 --port $port
