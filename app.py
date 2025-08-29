@@ -13,6 +13,7 @@ Features:
 
 import os
 import json
+import re
 import traceback
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -630,6 +631,55 @@ def api_test_matching():
         return jsonify({'error': f'Test failed: {str(e)}'}), 500
 
 
+@app.route('/api/generate-report', methods=['POST'])
+def api_generate_report():
+    """Saves a search result to a file and returns a unique ID for sharing."""
+    try:
+        data = request.get_json()
+        if not data or 'researcher' not in data or 'publications' not in data:
+            return jsonify({'error': 'Invalid report data provided'}), 400
+
+        report_id = str(uuid.uuid4())
+        report_dir = os.path.join(current_dir, 'reports')
+        os.makedirs(report_dir, exist_ok=True)
+
+        filepath = os.path.join(report_dir, f"{report_id}.json")
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+        return jsonify({'success': True, 'report_id': report_id})
+
+    except Exception as e:
+        print(f"❌ Report generation error: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f'Failed to generate report: {str(e)}'}), 500
+
+@app.route('/report/<report_id>')
+def view_report(report_id):
+    """Displays a saved report."""
+    try:
+        # Validate report_id to prevent directory traversal
+        if not re.match(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', report_id):
+            return "Invalid report ID format", 400
+
+        report_path = os.path.join(current_dir, 'reports', f"{report_id}.json")
+
+        if not os.path.exists(report_path):
+            return render_template('404.html', message="Report not found."), 404
+
+        with open(report_path, 'r', encoding='utf-8') as f:
+            report_data = json.load(f)
+
+        # Pass the full data, and also data as a JSON string for JS embedding
+        return render_template('report.html', report=report_data, report_json=json.dumps(report_data))
+
+    except Exception as e:
+        print(f"❌ Report viewing error: {str(e)}")
+        traceback.print_exc()
+        return render_template('500.html', message="Could not load report."), 500
+
+
 @app.route('/api/export', methods=['POST'])
 def api_export():
     """Export publications to CSV format."""
@@ -753,11 +803,49 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
     
     max_citations = max([c for c in standardized_citations.values() if c is not None], default=0)
 
+    # --- Step 4: Gap Analysis for Missing Sources ---
+    gap_analysis = {}
+    pub_year = clean_value(pub.year)
+    current_year = datetime.now().year
+    is_recent = pub_year and (current_year - pub_year <= 1)
+    is_preprint = 'arxiv' in (pub.journal or '').lower() or 'biorxiv' in (pub.journal or '').lower()
+
+    gap_reasons = {
+        'google_scholar': {
+            'url': 'https://scholar.google.com/intl/en/scholar/help.html#corrections',
+            'reason': 'Google Scholar indexing is automatic; check their guidelines for inclusion.'
+        },
+        'scopus': {
+            'url': 'https://www.scopus.com/feedback/form/documentation.uri',
+            'reason': 'Journal may not be indexed by Scopus, or the article is too recent.'
+        },
+        'wos': {
+            'url': 'https://support.clarivate.com/s/datacorrection?language=en_US',
+            'reason': 'Web of Science has a selective indexing policy; check journal coverage.'
+        },
+        'orcid': {
+            'url': 'https://orcid.org/my-orcid',
+            'reason': 'ORCID records must be added manually or linked from other databases.'
+        }
+    }
+
+    for source_key, is_covered in coverage.items():
+        if not is_covered:
+            reason = gap_reasons[source_key]['reason']
+            if is_recent:
+                reason = "Article may be too recent for indexing (published in the last 2 years)."
+            elif is_preprint and source_key != 'google_scholar':
+                reason = "Pre-prints are not typically indexed in this database."
+            gap_analysis[source_key] = {
+                'reason': reason,
+                'url': gap_reasons[source_key]['url']
+            }
+
     formatted_pub = {
         'title': clean_value(pub.title) or "",
         'authors': pub.authors if isinstance(pub.authors, list) else [],
         'journal': clean_value(pub.journal),
-        'year': clean_value(pub.year),
+        'year': pub_year,
         'doi': clean_value(pub.doi),
         'citations': max_citations,
         'source': clean_value(pub.source) or "Unknown",
@@ -765,7 +853,8 @@ def _format_publication(pub: Publication, all_publications: List[Publication] = 
         'coverage': coverage,
         'source_citations': standardized_citations,
         'links': final_links,
-        'coverage_count': sum(1 for v in coverage.values() if v)
+        'coverage_count': sum(1 for v in coverage.values() if v),
+        'gap_analysis': gap_analysis
     }
     
     return formatted_pub

@@ -12,6 +12,7 @@ let filteredPublications = [];
 let discoveredProfiles = null;
 let selectedProfiles = {};
 let sourceFilterState = { google_scholar: 0, scopus: 0, wos: 0, orcid: 0 }; // 0: any, 1: include, -1: exclude
+let chartInstances = {};
 
 // --- DOM Element References ---
 const searchForm = document.getElementById('search-form');
@@ -57,8 +58,15 @@ function initializeEventListeners() {
     // Page Actions
     document.getElementById('export-csv').addEventListener('click', exportToCSV);
     document.getElementById('print-btn').addEventListener('click', () => window.print());
+    document.getElementById('generate-report-btn').addEventListener('click', handleGenerateReport);
     document.getElementById('recent-searches').addEventListener('click', showRecentSearches);
     document.getElementById('settings-btn').addEventListener('click', showSettings);
+
+    // Report Link Modal
+    document.getElementById('close-report-modal').addEventListener('click', hideReportLinkModal);
+    document.getElementById('report-link-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'report-link-modal') hideReportLinkModal();
+    });
 }
 
 function initializeFilterEventListeners() {
@@ -234,6 +242,8 @@ function displayResults(data) {
     document.getElementById('sources-used').textContent = data.summary.sources_used.join(', ');
     document.getElementById('average-coverage').textContent = `${Math.round((data.summary.coverage_report?.average_coverage || 0) * 100)}%`;
 
+    renderAnalytics(data.publications || []);
+
     originalPublications = [...data.publications];
     filteredPublications = [...data.publications];
 
@@ -289,6 +299,7 @@ function displayResults(data) {
     } catch (e) { /* non-fatal UI enhancement */ }
 
     resultsSection.classList.remove('hidden');
+    document.getElementById('analytics-section').classList.remove('hidden');
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -308,7 +319,14 @@ function createPublicationRow(pub) {
                 ${Object.values(SOURCE_META).map(meta => {
                     const isActive = pub.coverage[meta.key];
                     const linkUrl = getSourceLink(meta.fullName);
-                    const iconHtml = `<div class="database-icon ${isActive ? 'active' : ''} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${isActive ? meta.color : '#e5e7eb'}" title="${meta.fullName}"><i class="${meta.icon} ${isActive ? 'text-white' : 'text-gray-400'} text-xs"></i></div>`;
+                    const gapInfo = !isActive && pub.gap_analysis ? pub.gap_analysis[meta.key] : null;
+
+                    const triggerClass = gapInfo ? 'coverage-gap-trigger cursor-pointer' : '';
+                    const dataAttrs = gapInfo ? `data-reason="${escape(gapInfo.reason)}" data-url="${escape(gapInfo.url)}"` : '';
+                    const title = gapInfo ? `${meta.fullName} (Missing - Click for info)` : meta.fullName;
+
+                    const iconHtml = `<div class="database-icon ${isActive ? 'active' : 'inactive'} ${triggerClass} w-6 h-6 rounded-full flex items-center justify-center" style="background-color: ${isActive ? meta.color : '#e5e7eb'}" title="${title}" ${dataAttrs}><i class="${meta.icon} ${isActive ? 'text-white' : 'text-gray-400'} text-xs"></i></div>`;
+
                     return (linkUrl && isActive) ? `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer">${iconHtml}</a>` : iconHtml;
                 }).join('')}
             </div>
@@ -522,6 +540,140 @@ function initializeYearRange() {
     }
 }
 
+
+// --- Gap Analysis Popover Logic ---
+document.addEventListener('DOMContentLoaded', () => {
+    const tableBody = document.getElementById('publications-table-body');
+    const popover = document.getElementById('gap-popover');
+
+    if (!tableBody || !popover) return;
+
+    tableBody.addEventListener('click', (e) => {
+        const trigger = e.target.closest('.coverage-gap-trigger');
+        if (trigger) {
+            e.stopPropagation();
+            const reason = unescape(trigger.dataset.reason);
+            const url = unescape(trigger.dataset.url);
+            showGapPopover(trigger, reason, url);
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!popover.contains(e.target) && !e.target.closest('.coverage-gap-trigger')) {
+            hideGapPopover();
+        }
+    });
+});
+
+function showGapPopover(targetElement, reason, url) {
+    const popover = document.getElementById('gap-popover');
+    const reasonEl = document.getElementById('gap-popover-reason');
+    const linkEl = document.getElementById('gap-popover-link');
+    const arrowEl = document.getElementById('gap-popover-arrow');
+
+    // Hide if already visible for another element
+    if (!popover.classList.contains('hidden') && popover.currentTarget !== targetElement) {
+        hideGapPopover();
+    }
+
+    popover.currentTarget = targetElement;
+    reasonEl.textContent = reason;
+    linkEl.href = url;
+
+    popover.classList.remove('hidden');
+
+    // Positioning logic
+    const targetRect = targetElement.getBoundingClientRect();
+    const popoverRect = popover.getBoundingClientRect();
+
+    let top = targetRect.bottom + window.scrollY + 8;
+    let left = targetRect.left + window.scrollX + (targetRect.width / 2) - (popoverRect.width / 2);
+
+    // Adjust if it goes off-screen
+    if (left < 0) left = 8;
+    if (left + popoverRect.width > window.innerWidth) left = window.innerWidth - popoverRect.width - 8;
+
+    popover.style.top = `${top}px`;
+    popover.style.left = `${left}px`;
+
+    // Position arrow
+    const arrowLeft = targetRect.left + window.scrollX + (targetRect.width / 2) - left;
+    arrowEl.style.left = `${arrowLeft - 6}px`;
+    arrowEl.style.top = '-6px';
+}
+
+function hideGapPopover() {
+    const popover = document.getElementById('gap-popover');
+    if (popover) {
+        popover.classList.add('hidden');
+        popover.currentTarget = null;
+    }
+}
+
+
+// --- Report Generation ---
+async function handleGenerateReport() {
+    if (!currentSearchResults) {
+        showError("No search results available to generate a report.");
+        return;
+    }
+
+    const btn = document.getElementById('generate-report-btn');
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Generating...`;
+    btn.disabled = true;
+
+    try {
+        const response = await fetch('/api/generate-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentSearchResults)
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to generate report on the server.');
+        }
+
+        showReportLinkModal(data.report_id);
+
+    } catch (error) {
+        console.error('Report generation error:', error);
+        showError(error.message);
+    } finally {
+        btn.innerHTML = originalContent;
+        btn.disabled = false;
+    }
+}
+
+function showReportLinkModal(reportId) {
+    const modal = document.getElementById('report-link-modal');
+    const input = document.getElementById('report-link-input');
+    const openLink = document.getElementById('open-report-link');
+    const copyButton = document.getElementById('copy-report-link');
+    const copyText = document.getElementById('copy-link-text');
+
+    const reportUrl = `${window.location.origin}/report/${reportId}`;
+    input.value = reportUrl;
+    openLink.href = reportUrl;
+
+    copyButton.onclick = () => {
+        navigator.clipboard.writeText(reportUrl).then(() => {
+            copyText.textContent = 'Copied!';
+            setTimeout(() => { copyText.textContent = 'Copy'; }, 2000);
+        }, () => {
+            showError('Failed to copy link to clipboard.');
+        });
+    };
+
+    modal.classList.remove('hidden');
+}
+
+function hideReportLinkModal() {
+    const modal = document.getElementById('report-link-modal');
+    modal.classList.add('hidden');
+}
+
 function initSourceIconFilters() {
     document.querySelectorAll('.source-toggle').forEach(el => {
         const key = el.dataset.source;
@@ -631,5 +783,145 @@ async function exportToCSV() {
     } catch (error) {
         console.error('Export error:', error);
         showError('Export failed. Please try again.');
+    }
+}
+
+// --- Analytics Dashboard ---
+function renderAnalytics(publications) {
+    // Destroy existing charts before rendering new ones
+    Object.values(chartInstances).forEach(chart => chart.destroy());
+    chartInstances = {};
+
+    if (!publications || publications.length === 0) {
+        document.getElementById('analytics-section').classList.add('hidden');
+        return;
+    }
+
+    // --- Data Processing ---
+    const currentYear = new Date().getFullYear();
+    const minYear = publications.reduce((min, p) => (p.year && p.year < min) ? p.year : min, currentYear);
+
+    // 1. Publications by Year
+    const pubsByYear = {};
+    for (let y = minYear; y <= currentYear; y++) pubsByYear[y] = 0;
+    publications.forEach(p => {
+        if (p.year && p.year >= minYear) pubsByYear[p.year] = (pubsByYear[p.year] || 0) + 1;
+    });
+
+    // 2. Citations by Publication Year
+    const citationsByYear = {};
+    for (let y = minYear; y <= currentYear; y++) citationsByYear[y] = 0;
+    publications.forEach(p => {
+        if (p.year && p.year >= minYear) citationsByYear[p.year] += (p.citations || 0);
+    });
+
+    // 3. Top Publication Venues
+    const venueCounts = publications.reduce((acc, p) => {
+        if (p.journal) {
+            const journal = p.journal.trim();
+            acc[journal] = (acc[journal] || 0) + 1;
+        }
+        return acc;
+    }, {});
+    const topVenues = Object.entries(venueCounts)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 10);
+
+    // --- Chart Rendering ---
+    const chartOptions = (title) => ({
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                backgroundColor: '#1f2937',
+                titleFont: { size: 14, weight: 'bold' },
+                bodyFont: { size: 12 },
+                padding: 10,
+                cornerRadius: 4,
+                displayColors: false
+            }
+        },
+        scales: {
+            x: {
+                grid: { display: false },
+                ticks: { font: { size: 10 } }
+            },
+            y: {
+                beginAtZero: true,
+                grid: { color: '#e5e7eb' },
+                ticks: { font: { size: 10 }, precision: 0 }
+            }
+        }
+    });
+
+    // Chart 1: Publications by Year (Bar)
+    if (document.getElementById('publicationsByYearChart')) {
+        const ctx = document.getElementById('publicationsByYearChart').getContext('2d');
+        chartInstances.pubsByYear = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(pubsByYear),
+                datasets: [{
+                    label: 'Publications',
+                    data: Object.values(pubsByYear),
+                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
+                    borderColor: 'rgba(31, 41, 55, 1)',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                }]
+            },
+            options: chartOptions('Publications by Year')
+        });
+    }
+
+    // Chart 2: Citations by Year (Line)
+    if (document.getElementById('citationsByYearChart')) {
+        const ctx = document.getElementById('citationsByYearChart').getContext('2d');
+        chartInstances.citesByYear = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Object.keys(citationsByYear),
+                datasets: [{
+                    label: 'Citations',
+                    data: Object.values(citationsByYear),
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 2,
+                    pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+                    pointRadius: 3,
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: chartOptions('Citations by Publication Year')
+        });
+    }
+
+    // Chart 3: Top Venues (Horizontal Bar)
+    if (document.getElementById('topVenuesChart')) {
+        const ctx = document.getElementById('topVenuesChart').getContext('2d');
+        chartInstances.topVenues = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: topVenues.map(v => v[0]),
+                datasets: [{
+                    label: 'Count',
+                    data: topVenues.map(v => v[1]),
+                    backgroundColor: 'rgba(16, 185, 129, 0.8)',
+                    borderColor: 'rgba(16, 185, 129, 1)',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                ...chartOptions('Top Publication Venues'),
+                indexAxis: 'y',
+                scales: {
+                    x: { ticks: { precision: 0 } },
+                    y: { ticks: { font: { size: 9 } } }
+                }
+            }
+        });
     }
 }

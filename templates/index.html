@@ -6,6 +6,7 @@
     <title>PubCrawler</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/styles.css">
     <script>
@@ -256,12 +257,42 @@
                         <div id="researcher-info" class="mt-2 flex flex-wrap items-center gap-2"></div>
                     </div>
                     <div class="flex items-center gap-2">
+                        <button id="generate-report-btn" class="px-3 py-2 text-sm border border-blue-200 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 flex items-center">
+                            <i class="fas fa-share-alt mr-2"></i> Share Report
+                        </button>
                         <button id="export-csv" class="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 flex items-center">
-                            <i class="fas fa-download mr-2"></i> Export
+                            <i class="fas fa-download mr-2"></i> Export CSV
                         </button>
                         <button id="print-btn" class="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 flex items-center">
                             <i class="fas fa-print mr-2"></i> Print
                         </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Dashboard Section -->
+            <div id="analytics-section" class="mb-6 hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <!-- Publications over Time -->
+                    <div class="bg-white rounded-xl shadow-light p-5">
+                        <h4 class="text-lg font-medium text-gray-800 mb-4 text-center">Publications by Year</h4>
+                        <div class="chart-container" style="position: relative; height:300px;">
+                            <canvas id="publicationsByYearChart"></canvas>
+                        </div>
+                    </div>
+                    <!-- Citations over Time -->
+                    <div class="bg-white rounded-xl shadow-light p-5">
+                        <h4 class="text-lg font-medium text-gray-800 mb-4 text-center">Citations by Publication Year</h4>
+                        <div class="chart-container" style="position: relative; height:300px;">
+                            <canvas id="citationsByYearChart"></canvas>
+                        </div>
+                    </div>
+                    <!-- Top Journals -->
+                    <div class="bg-white rounded-xl shadow-light p-5">
+                        <h4 class="text-lg font-medium text-gray-800 mb-4 text-center">Top Publication Venues</h4>
+                        <div class="chart-container" style="position: relative; height:300px;">
+                            <canvas id="topVenuesChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -527,6 +558,43 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Report Link Modal -->
+    <div id="report-link-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-full max-w-lg transform transition-all" id="report-modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-medium text-gray-900 flex items-center">
+                    <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                    Report Generated Successfully
+                </h3>
+                <button id="close-report-modal" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <p class="text-sm text-gray-600 mb-3">Your shareable report is ready. Use the link below to view or share it.</p>
+            <div class="flex items-center space-x-2 bg-gray-100 p-2 rounded-lg border">
+                <input type="text" id="report-link-input" readonly class="flex-grow bg-transparent border-none focus:ring-0 text-sm text-gray-700">
+                <button id="copy-report-link" class="px-3 py-1 bg-gray-800 text-white text-xs font-semibold rounded-md hover:bg-gray-700 flex items-center">
+                    <i class="fas fa-copy mr-1"></i>
+                    <span id="copy-link-text">Copy</span>
+                </button>
+            </div>
+            <div class="mt-5 text-center">
+                <a id="open-report-link" href="#" target="_blank" class="inline-flex items-center justify-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-external-link-alt mr-2"></i>
+                    Open Report in New Tab
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gap Analysis Popover -->
+    <div id="gap-popover" class="absolute z-[100] w-64 bg-gray-800 text-white rounded-lg shadow-xl p-4 text-sm hidden transform transition-opacity duration-200">
+        <p id="gap-popover-reason" class="mb-3"></p>
+        <a id="gap-popover-link" href="#" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center w-full px-3 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 text-xs">
+            <i class="fas fa-external-link-alt mr-2"></i>
+            Request Indexing
+        </a>
+        <div id="gap-popover-arrow" class="absolute bg-gray-800 h-3 w-3 transform rotate-45"></div>
     </div>
 
     <!-- Footer -->
