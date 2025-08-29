@@ -671,6 +671,22 @@ def view_report(report_id):
         with open(report_path, 'r', encoding='utf-8') as f:
             report_data = json.load(f)
 
+        # Sort publications in the backend to handle missing years gracefully
+        if 'publications' in report_data and isinstance(report_data['publications'], list):
+            report_data['publications'].sort(key=lambda p: p.get('year') or 0, reverse=True)
+
+        # Format timestamp in the backend for robustness
+        researcher_data = report_data.get('researcher', {})
+        timestamp_str = researcher_data.get('search_timestamp', '')
+        formatted_timestamp = ''
+        if timestamp_str:
+            try:
+                dt_object = datetime.fromisoformat(timestamp_str)
+                formatted_timestamp = dt_object.strftime('%Y-%m-%d %H:%M:%S')
+            except (ValueError, TypeError):
+                formatted_timestamp = str(timestamp_str).split('.')[0].replace('T', ' ')
+        researcher_data['formatted_timestamp'] = formatted_timestamp
+
         # Pass the full data, and also data as a JSON string for JS embedding
         return render_template('report.html', report=report_data, report_json=json.dumps(report_data))
 
