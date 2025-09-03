@@ -66,6 +66,33 @@ pip install -e .
 2. Open `http://localhost:5000` in a browser.  
 3. Search using a researcher’s name, IDs, or affiliation.  
 
+### Desktop App (One-Click)
+
+A native desktop launcher is available for single-user, local use. It embeds the existing web UI in a window using a lightweight webview and runs the Flask server in the background. The original network-accessible entry (`run_web.py`) and scripts (`start_network.sh` / `.bat`) remain unchanged and continue to work as before.
+
+- Run from source (requires `pywebview`):
+  ```bash
+  pip install pywebview
+  python desktop_app.py
+  ```
+  The app starts locally on a random free port and opens in a desktop window.
+
+- Build a standalone executable with PyInstaller:
+  - macOS/Linux:
+    ```bash
+    ./build_desktop.sh
+    # Launch the built app
+    ./dist/PubCrawlerDesktop/PubCrawlerDesktop
+    ```
+  - Windows:
+    ```bat
+    build_desktop.bat
+    rem Launch the built app
+    dist\PubCrawlerDesktop\PubCrawlerDesktop.exe
+    ```
+
+These scripts bundle templates and static assets, producing a single-folder app under `dist/`. If you prefer a single-file binary, add `--onefile` to the PyInstaller command in the scripts.
+
 ### Command Line
 
 ```bash
@@ -154,6 +181,10 @@ class Publication:
 - `rapidfuzz` – Fuzzy matching  
 
 See `requirements.txt` for the full list.
+
+Desktop build requires in addition:
+- `pywebview` – Native window wrapper for the web UI
+- `pyinstaller` – To package as a standalone executable
 
 ---
 
