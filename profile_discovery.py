@@ -307,13 +307,14 @@ class OptimizedStealthDriver:
             options.add_argument(f'--proxy-server={proxy}')
         # Always use global toggle
         headless = HEADLESS_MODE if headless is None else headless
-        # Remove headless argument block
-        # if headless:
-        #     options.add_argument('--headless=new')
-        #     options.add_argument('--no-first-run')
-        #     options.add_argument('--disable-default-apps')
-        options.add_argument('--no-first-run')
-        options.add_argument('--disable-default-apps')
+        # Add headless argument when needed
+        if headless:
+            options.add_argument('--headless=new')
+            options.add_argument('--no-first-run')
+            options.add_argument('--disable-default-apps')
+        else:
+            options.add_argument('--no-first-run')
+            options.add_argument('--disable-default-apps')
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         self._post_boot_stealth(driver)
         driver.set_page_load_timeout(20)
